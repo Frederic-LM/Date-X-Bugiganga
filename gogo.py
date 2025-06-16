@@ -1,30 +1,106 @@
+      
 # ==============================================================================
 #
-#  The Cross-Dating Tool for Historical Instrument Analysis
+#            The Dendro-Detective: A Cross-Dating Toolkit
 #
-#  Version: 3.6 (Final - All Functions Included and Fully Functional)
+#                           Version: 4.0 (Curator)
+#
+# ==============================================================================
 #
 #  OVERVIEW:
-#  This is the complete, working version of the script. It includes a robust
-#  parser and indexer, and the cross-dating and plotting functions are now
-#  fully implemented and called correctly from a clean command-line interface.
+#  This script is a comprehensive command-line tool for professional-level
+#  dendrochronological analysis. Originally designed to replicate CDendro/COFECHA
+#  for cross-dating historical instrument wood, it has evolved into a full-featured
+#  toolkit for data acquisition, curation, and analysis.
 #
-#  WORKFLOW:
-#  STEP 1: Create a Local Index (Run ONCE, takes 15-30 mins)
+#
+#  SCRIPT EVOLUTION & KEY REVISIONS:
+#
+#  - V1.0 (The Cross-Dater): Implemented the core logic of parsing .rwl files,
+#    detrending data with splines, and using a sliding window for correlation
+#    to find the best date for a sample against a single master file.
+#
+#  - V2.0 (The Data Acquirer): Added functionality to automatically connect to
+#    the NOAA public FTP server to download tree-ring data. Initial attempts
+#    to filter by directory proved flawed due to the server's flat structure.
+#
+#  - V3.0 (The Indexer): A major architectural revision. Introduced the `index`
+#    command to perform a slow, one-time scan of the entire NOAA Europe
+#    database. This command downloads all files and creates a local metadata
+#    index (`noaa_europe_index.csv`), making all subsequent operations fast and
+#    reliable. This solved the critical problem of efficiently finding relevant data.
+#    A robust parser (`parse_rwl_robust`) was developed to handle messy,
+#    real-world data files.
+#
+#  - V3.5 (The Detective): Introduced the powerful `detective` command. Instead
+#    of comparing a sample to a blurry, averaged master, this command runs the
+#    sample against hundreds of individual site chronologies from the index.
+#    This allows for pinpointing the exact origin of the wood and identifying
+#    the best possible matches, even when a broad master fails.
+#
+#  - V4.0 (The Curator): Added the final, crucial `create` command. This
+#    empowers the user to act as a data curator. After using the `detective`
+#    tool to identify a "family" of elite, highly correlated files, the user
+#    can place them in a local folder and use the `create` command to forge them
+#    into a new, hyper-specific, high-quality master chronology. This represents
+#    the pinnacle of the dendrochronological workflow.
+#
+#
+#  AVAILABLE COMMANDS AND WORKFLOW:
+#
+#  The recommended workflow follows these steps:
+#
+#  STEP 1: Create a Local Index (Run only ONCE)
+#  ------------------------------------------------
+#  Scans the entire NOAA Europe database and builds your local "map".
+#  This will take 15-30 minutes.
+#
+#  COMMAND:
 #     python dd.py index
 #
-#  STEP 2: Build Master Chronologies from the Local Index (Fast)
+#
+#  STEP 2: Build Broad Master Chronologies (Optional but Recommended)
+#  ------------------------------------------------------------------
+#  Uses the local index to quickly build reference chronologies.
+#
+#  COMMAND:
 #     python dd.py build
+#     python dd.py build --target alpine
 #
-#  STEP 3: Date Your Sample (Two powerful methods)
-#     # A) Broad search against all sites in a category
-#     python dd.py detective your_sample.rwl --category alpine
 #
-#     # B) Direct 1-on-1 comparison against a specific master OR another .rwl file
-#     python dd.py date your_sample.rwl master_alpine_instrument_wood.csv
-#     python dd.py date your_sample.rwl swed023e.rwl
+#  STEP 3: Find Potential Matches (The "Detective" Work)
+#  -----------------------------------------------------
+#  Runs your sample against hundreds of individual reference files to find
+#  the best potential matches. Use this to identify a "family" of related series.
+#
+#  COMMANDS:
+#     python dd.py detective your_sample.rwl
+#     python dd.py detective your_sample.rwl --category baltic
+#     python dd.py detective your_sample.rwl --category all --top_n 20
+#
+#
+#  STEP 4: Create a Custom "Elite" Master (The "Curator" Work)
+#  -----------------------------------------------------------
+#  After identifying the best files from the detective step, copy them to a
+#  new folder and use this command to forge them into a high-quality master.
+#
+#  COMMAND:
+#     python dd.py create path/to/your/elite_files/ my_elite_master.csv
+#
+#
+#  STEP 5: Perform the Final Dating (The "Confirmation")
+#  -----------------------------------------------------
+#  Cross-date your sample against your newly created elite master for the
+#  most definitive result. This command can also do a direct 1-on-1 comparison
+#  between any two .rwl files.
+#
+#  COMMANDS:
+#     python dd.py date your_sample.rwl my_elite_master.csv
+#     python dd.py date your_sample.rwl another_sample.rwl
 #
 # ==============================================================================
+
+    
 
 # --- 1. IMPORTS ---
 import os
@@ -156,7 +232,6 @@ def cross_date(sample_series: pd.Series, master_series: pd.Series, min_overlap: 
     rdf = pd.DataFrame(corrs)
     return {"best_match": rdf.loc[rdf['t_value'].idxmax()].to_dict(), "all_correlations": rdf.set_index('end_year')}
 
-# --- Replace your entire plot_results function with this one ---
 def plot_results(
     raw_sample,
     master_detrended,
@@ -233,14 +308,14 @@ def plot_results(
     ax3 = plt.subplot(2, 2, 3)
     aligned_raw_sample = raw_sample.copy()
     aligned_raw_sample.index = pd.RangeIndex(start=best_start_year, stop=best_end_year + 1)
-    # NEW: Use dynamic filenames in legends
+    # Use dynamic filenames in legends
     ax3.plot(aligned_raw_sample.index, aligned_raw_sample.values, label=f'Sample: {sample_label}', color='green')
     if reference_is_rwl and raw_master is not None:
         ax3.plot(raw_master.index, raw_master.values, label=f'Reference: {master_label}', color='black', alpha=0.7)
     else:
         rescaled_master_for_plot = master_detrended * raw_sample.mean()
         ax3.plot(rescaled_master_for_plot.index, rescaled_master_for_plot.values, label=f'Ref (scaled): {master_label}', color='black', alpha=0.7)
-    # NEW: Highlight the overlap region
+    # Highlight the overlap region
     ax3.axvspan(overlap_start_year, overlap_end_year, color='gray', alpha=0.2, label=f'Overlap Region (n={n_val})')
     ax3.set_xlim(overlap_start_year - 10, overlap_end_year + 10) # Zoom in
     ax3.set_xlabel("Year"); ax3.set_ylabel("Ring Width (mm)"); ax3.set_title("3. Raw Data Visual Match"); ax3.legend()
