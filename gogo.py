@@ -2,7 +2,7 @@
 #
 #  The Cross-Dating Tool for Historical Instrument Analysis
 #
-#  Version: 3.5 (Final - All Functions Included and Fully Functional)
+#  Version: 3.6 (Final - All Functions Included and Fully Functional)
 #
 #  OVERVIEW:
 #  This is the complete, working version of the script. It includes a robust
@@ -75,6 +75,61 @@ def detrend(series: pd.Series, spline_stiffness_pct: int = 67) -> pd.Series:
     spline = UnivariateSpline(x, y, s=s)
     spline_fit = pd.Series(spline(x), index=x)
     return series / (spline_fit + 1e-6)
+
+def run_create_master(input_folder, output_filename):
+    """
+    Creates a new master chronology from a local folder of .rwl files.
+    """
+    print("\n" + "="*60)
+    print(f"CREATING CUSTOM MASTER CHRONOLOGY")
+    print(f"Source Folder: '{input_folder}'")
+    print("="*60)
+
+    if not os.path.isdir(input_folder):
+        print(f"ERROR: The specified folder '{input_folder}' does not exist.")
+        return
+
+    # Find all .rwl files in the specified folder
+    file_list = [f for f in os.listdir(input_folder) if f.lower().endswith('.rwl')]
+
+    if not file_list:
+        print(f"ERROR: No .rwl files were found in '{input_folder}'.")
+        return
+
+    print(f"Found {len(file_list)} .rwl files. Processing...")
+    
+    detrended_series_list = []
+    # Use tqdm for a progress bar, just like in the other functions
+    for filename in tqdm(file_list, desc="Processing custom files"):
+        full_path = os.path.join(input_folder, filename)
+        series = parse_rwl_robust(full_path)
+        if not series.empty:
+            detrended_series_list.append(detrend(series))
+
+    if not detrended_series_list:
+        print("ERROR: Failed to process any of the .rwl files in the folder.")
+        return
+
+    # The rest of this logic is identical to the end of build_master_from_index
+    print(f"\nCombining {len(detrended_series_list)} series into a new master...")
+    combined_df = pd.concat(detrended_series_list, axis=1)
+    master_chronology = combined_df.mean(axis=1)
+    
+    # Ensure the master is robust by checking replication
+    series_count = combined_df.notna().sum(axis=1)
+    master_chronology = master_chronology[series_count >= 2].dropna() # Can use a lower replication for custom masters
+
+    # Ensure the output filename ends with .csv
+    if not output_filename.lower().endswith('.csv'):
+        output_filename += ".csv"
+
+    master_chronology.to_csv(output_filename, header=['value'], index_label='year')
+    
+    print("\n--- SUCCESS! ---")
+    print(f"Custom master chronology created.")
+    print(f"Time Span: {int(master_chronology.index.min())} to {int(master_chronology.index.max())}")
+    print(f"Saved to: '{output_filename}'")
+    print("="*60)
 
 def calculate_t_value(r: float, n: int) -> float:
     """Calculates the Student's t-statistic for a Pearson correlation."""
@@ -360,26 +415,49 @@ def run_detective_analysis(sample_file, category, top_n):
 
 # --- 5. MAIN DISPATCHER ---
 def main():
-    parser = argparse.ArgumentParser(description="Dendrochronology toolkit for instrument analysis (V3.5).", formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description="Dendrochronology toolkit for instrument analysis (V3.6).",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     subparsers = parser.add_subparsers(dest='command', required=True)
+
+    # Command: index
     subparsers.add_parser('index', help="Create a local index of NOAA data (RUN THIS FIRST).")
-    parser_build = subparsers.add_parser('build', help="Build master chronologies from the local index (fast).")
+
+    # Command: build
+    parser_build = subparsers.add_parser('build', help="Build master chronologies from the online data index.")
     parser_build.add_argument('--target', choices=['alpine', 'baltic', 'all'], default='all', help="Which master to build. (Default: all)")
+    
+    # NEW Command: create
+    parser_create = subparsers.add_parser('create', help="Create a custom master from a local folder of .rwl files.")
+    parser_create.add_argument('input_folder', help="Path to the folder containing your .rwl files.")
+    parser_create.add_argument('output_filename', help="Name for the new master .csv file (e.g., 'my_master.csv').")
+
+    # Command: date
     parser_date = subparsers.add_parser('date', help='Cross-date a sample against a master or another .rwl file.')
     parser_date.add_argument('sample_file', help="Path to your sample .rwl file.")
     parser_date.add_argument('master_file', help="Path to the reference .csv or .rwl file.")
+
+    # Command: detective
     parser_detective = subparsers.add_parser('detective', help="Run a sample against ALL individual files in a category.")
     parser_detective.add_argument('sample_file', help="Path to your sample .rwl file.")
     parser_detective.add_argument('--category', choices=['alpine', 'baltic', 'all'], default='alpine', help="Which category to test against. (Default: alpine)")
     parser_detective.add_argument('--top_n', type=int, default=10, help="Number of top results to display. (Default: 10)")
+    
     args = parser.parse_args()
 
-    if args.command == 'index': create_ftp_index()
+    # --- Dispatch the command to the appropriate function ---
+    if args.command == 'index':
+        create_ftp_index()
     elif args.command == 'build':
         if args.target in ['alpine', 'all']: build_master_from_index("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750)
         if args.target in ['baltic', 'all']: build_master_from_index("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750)
-    elif args.command == 'date': run_date_analysis(args.sample_file, args.master_file)
-    elif args.command == 'detective': run_detective_analysis(args.sample_file, args.category, args.top_n)
+    elif args.command == 'create':
+        run_create_master(args.input_folder, args.output_filename)
+    elif args.command == 'date':
+        run_date_analysis(args.sample_file, args.master_file)
+    elif args.command == 'detective':
+        run_detective_analysis(args.sample_file, args.category, args.top_n)
 
 if __name__ == '__main__':
     main()
