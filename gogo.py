@@ -1,7 +1,7 @@
       
 # ==============================================================================
 #
-#                  GoGo-Detective: A Cross-Dating Bufiganda
+#                  GoGo-Bugiganga: a Cross-Dating Tools Set
 #
 #                           Version: 4.0 (Curator)
 #
