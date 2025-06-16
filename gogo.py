@@ -1,7 +1,7 @@
       
 # ==============================================================================
 #
-#            The Dendro-Detective: A Cross-Dating Toolkit
+#            The GoGo-Detective: A Cross-Dating Bufiganda
 #
 #                           Version: 4.0 (Curator)
 #
