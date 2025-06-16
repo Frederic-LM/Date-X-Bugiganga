@@ -3,7 +3,7 @@
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-*YGoGo-Bugiganga to jump into X-Dating.*
+*GoGo-Bugiganga to jump into X-Dating.*
 
 ---
 
