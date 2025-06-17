@@ -64,22 +64,29 @@
 #  Uses the local index to quickly build reference chronologies.
 #
 #  COMMAND:
+#     # A) Build master chronologies from the full local index (Fast)
 #     python dd.py build
 #     python dd.py build --target alpine
+#     # B) OR Create a custom master from your own .rwl files (e.g., violin references)
+#     python gogo.py create violin_references master_violin_chronology.csv
 #
-#
-#  STEP 3: Find Potential Matches (The "Detective" Work)
+#  STEP 3: Find Potential Matches (The "Detective" Mode)
 #  -----------------------------------------------------
 #  Runs your sample against hundreds of individual reference files to find
 #  the best potential matches. Use this to identify a "family" of related series.
+#     Note: The script automatically ignores existing dates in your sample for the
+#     analysis, finds the best match, and then reports if its finding
+#     agrees with the original file's dating.
 #
 #  COMMANDS:
+#     #    Use a predefined category...
 #     python dd.py detective your_sample.rwl
 #     python dd.py detective your_sample.rwl --category baltic
 #     python dd.py detective your_sample.rwl --category all --top_n 20
+#     #    ...OR use your own local folder of references! (NEW)
+#     python gogo.py detective your_sample.rwl violin_references
 #
-#
-#  STEP 4: Create a Custom "Elite" Master (The "Curator" Work)
+#  OPTIONAL STEP 4: Create your Custom Master
 #  -----------------------------------------------------------
 #  After identifying the best files from the detective step, copy them to a
 #  new folder and use this command to forge them into a high-quality master.
@@ -88,7 +95,7 @@
 #     python dd.py create path/to/your/elite_files/ my_elite_master.csv
 #
 #
-#  STEP 5: Perform the Final Dating (The "Confirmation")
+#  STEP 4: Perform the Final Dating
 #  -----------------------------------------------------
 #  Cross-date your sample against your newly created elite master for the
 #  most definitive result. This command can also do a direct 1-on-1 comparison
@@ -113,11 +120,14 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 from scipy.interpolate import UnivariateSpline
-
+import multiprocessing
 # --- 2. CORE DENDROCHRONOLOGY FUNCTIONS ---
 
-def parse_rwl_robust(file_path: str) -> pd.Series:
-    """A highly robust parser for messy, real-world RWL files."""
+def parse_rwl_robust(file_path: str, is_floating: bool = False) -> pd.Series:
+    """
+    A highly robust parser for messy, real-world RWL files.
+    Can treat a file as 'floating' (ignoring its baked-in years).
+    """
     all_rings = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -126,25 +136,73 @@ def parse_rwl_robust(file_path: str) -> pd.Series:
                 if not line: continue
                 parts = line.split()
                 if len(parts) < 2: continue
-                try: year_val = int(parts[1])
-                except (ValueError, IndexError): continue
-                if not (100 < year_val < 2100): continue
-                start_year = (year_val // 10) * 10
-                for i, val_str in enumerate(parts[2:]):
+
+                # If the series is NOT floating, we use its dates.
+                if not is_floating:
                     try:
-                        width = int(val_str)
-                        if width in [-9999, 999]: continue
-                        current_year = start_year + i
-                        if i == 0 and current_year != year_val: start_year = year_val; current_year = year_val
-                        all_rings.append({'year': current_year, 'width': width / 100.0})
-                    except ValueError: continue
-    except Exception: return pd.Series(dtype=np.float64)
+                        year_val = int(parts[1])
+                    except (ValueError, IndexError):
+                        continue
+                    if not (100 < year_val < 2100): continue # Basic sanity check
+                    start_year = (year_val // 10) * 10
+                    value_parts = parts[2:]
+                    for i, val_str in enumerate(value_parts):
+                        try:
+                            width = int(val_str)
+                            if width in [-9999, 999]: continue
+                            current_year = start_year + i
+                            # Handle Tucson format decade-misalignment bug
+                            if i == 0 and current_year != year_val:
+                                start_year = year_val
+                                current_year = year_val
+                            all_rings.append({'year': current_year, 'width': width / 100.0})
+                        except ValueError:
+                            continue
+                # If it IS floating, we ignore the date column and just count rings.
+                else:
+                    # For floating, we assume the values start after the ID
+                    value_parts = parts[1:]
+                    for val_str in value_parts:
+                        try:
+                            width = int(val_str)
+                            if width in [-9999, 999]: continue
+                            # 'year' here is just a placeholder for ring number
+                            all_rings.append({'year': len(all_rings) + 1, 'width': width / 100.0})
+                        except ValueError:
+                            continue
+
+    except FileNotFoundError:
+        print(f"Error: The file was not found at the specified path: {file_path}")
+        return pd.Series(dtype=np.float64)
+    except Exception as e:
+        print(f"An unexpected error occurred while parsing {file_path}: {e}")
+        return pd.Series(dtype=np.float64)
+    
     if not all_rings: return pd.Series(dtype=np.float64)
     df = pd.DataFrame(all_rings).drop_duplicates(subset='year').set_index('year')
-    return df['width'].sort_index()
+    
+    # Explicitly drop any rows that might have resulted in NaN values
+    # before returning the final series. This makes it more robust.
+    clean_series = df['width'].dropna().sort_index()
+
+    # Final check for floating series
+    if is_floating:
+        clean_series.index = pd.RangeIndex(start=1, stop=len(clean_series) + 1, name='ring_number')
+        return clean_series
+    else:
+        return clean_series
+    # Final check: For floating series, ensure the index is a clean sequence
+    if is_floating:
+        series = df['width']
+        series.index = pd.RangeIndex(start=1, stop=len(series) + 1, name='ring_number')
+        return series
+    else:
+        return df['width'].sort_index()
+
 
 def detrend(series: pd.Series, spline_stiffness_pct: int = 67) -> pd.Series:
     """Detrends a time series using a standard smoothing spline."""
+    series = series.dropna()
     if len(series) < 15: return pd.Series(dtype=np.float64)
     x, y = series.index.values, series.values
     s = len(series) * (spline_stiffness_pct / 100)**3
@@ -232,6 +290,7 @@ def cross_date(sample_series: pd.Series, master_series: pd.Series, min_overlap: 
     rdf = pd.DataFrame(corrs)
     return {"best_match": rdf.loc[rdf['t_value'].idxmax()].to_dict(), "all_correlations": rdf.set_index('end_year')}
 
+# ---  plot_results function  ---
 def plot_results(
     raw_sample,
     master_detrended,
@@ -308,14 +367,14 @@ def plot_results(
     ax3 = plt.subplot(2, 2, 3)
     aligned_raw_sample = raw_sample.copy()
     aligned_raw_sample.index = pd.RangeIndex(start=best_start_year, stop=best_end_year + 1)
-    # Use dynamic filenames in legends
+    # NEW: Use dynamic filenames in legends
     ax3.plot(aligned_raw_sample.index, aligned_raw_sample.values, label=f'Sample: {sample_label}', color='green')
     if reference_is_rwl and raw_master is not None:
         ax3.plot(raw_master.index, raw_master.values, label=f'Reference: {master_label}', color='black', alpha=0.7)
     else:
         rescaled_master_for_plot = master_detrended * raw_sample.mean()
         ax3.plot(rescaled_master_for_plot.index, rescaled_master_for_plot.values, label=f'Ref (scaled): {master_label}', color='black', alpha=0.7)
-    # Highlight the overlap region
+    # NEW: Highlight the overlap region
     ax3.axvspan(overlap_start_year, overlap_end_year, color='gray', alpha=0.2, label=f'Overlap Region (n={n_val})')
     ax3.set_xlim(overlap_start_year - 10, overlap_end_year + 10) # Zoom in
     ax3.set_xlabel("Year"); ax3.set_ylabel("Ring Width (mm)"); ax3.set_title("3. Raw Data Visual Match"); ax3.legend()
@@ -413,18 +472,21 @@ def run_date_analysis(sample_file, master_file):
     if not os.path.exists(sample_file) or not os.path.exists(master_file):
         print("Error: One or both specified files do not exist."); return
     print(f"\n--- Running Cross-Dating Analysis ---\nSample: '{sample_file}'\nReference: '{master_file}'")
-    sample_raw = parse_rwl_robust(sample_file)
+    
+    # --- CORE LOGIC CHANGE ---
+    # 1. Parse the sample as a "floating" series, ignoring its internal dates.
+    print("Parsing sample as a 'floating' chronology (ignoring its dates for analysis)...")
+    sample_raw = parse_rwl_robust(sample_file, is_floating=True) # <--- USE THE NEW FLAG
     if sample_raw.empty: print("Could not parse sample file."); return
     sample_detrended = detrend(sample_raw)
 
     master_raw = None
     reference_is_rwl = False
     if master_file.lower().endswith('.csv'):
-        print("Reference is a .csv master chronology. Loading...")
         master_detrended = pd.read_csv(master_file, index_col='year').squeeze("columns")
     elif master_file.lower().endswith('.rwl'):
-        print("Reference is an .rwl file. Parsing and detrending on the fly...")
-        master_raw = parse_rwl_robust(master_file)
+        # The reference is always treated as dated (is_floating=False is default)
+        master_raw = parse_rwl_robust(master_file) 
         if master_raw.empty: print("Could not parse reference .rwl file."); return
         master_detrended = detrend(master_raw)
         reference_is_rwl = True
@@ -440,58 +502,142 @@ def run_date_analysis(sample_file, master_file):
         print(f"Correlation (r):      {best['correlation']:.4f}")
         print(f"T-Value:              {best['t_value']:.4f} (A value > 4.0 is a strong indicator)")
         print(f"Overlap (n):          {int(best['overlap_n'])} years")
+        
+        # --- NEW VERIFICATION STEP ---
+        # 2. Now, parse the sample again, but this time reading its dates for comparison.
+        sample_with_original_dates = parse_rwl_robust(sample_file, is_floating=False)
+        if not sample_with_original_dates.empty:
+            original_end_year = int(sample_with_original_dates.index.max())
+            script_found_year = int(best['end_year'])
+            
+            print("\n--- Original Date Verification ---")
+            print(f"The original file had a last ring year of: {original_end_year}")
+            if original_end_year == script_found_year:
+                print(f"✅ SUCCESS: The script's finding ({script_found_year}) MATCHES the date in the file!")
+            else:
+                print(f"⚠️ NOTE: The script's finding ({script_found_year}) DOES NOT MATCH the file's date.")
+        
+        # 3. Plot the results using the floating series.
         plot_results(sample_raw, master_detrended, sample_detrended, analysis_results, sample_file, master_file, reference_is_rwl, master_raw)
     else: print(f"\nAnalysis failed: {analysis_results['error']}")
 
 def run_detective_analysis(sample_file, category, top_n):
-    """Performs site-by-site analysis against a category of files from the index."""
-    print(f"\n--- Running Detective Analysis ---\nSample: '{sample_file}' | Category: '{category}'")
-    index_filename = "noaa_europe_index.csv"
-    if not os.path.exists(index_filename): print(f"ERROR: Index file missing."); return
-    sample_raw = parse_rwl_robust(sample_file)
+    """
+    Performs site-by-site analysis. Now accepts either a predefined category
+    ('alpine', 'baltic', 'all') OR a path to a local folder of .rwl files.
+    """
+    print(f"\n--- Running Detective Analysis (in parallel) ---\nSample: '{sample_file}' | Target: '{category}'")
+    
+    print("Parsing sample as a 'floating' chronology...")
+    sample_raw = parse_rwl_robust(sample_file, is_floating=True)
     if sample_raw.empty: print("Could not parse sample file."); return
     sample_detrended = detrend(sample_raw)
 
-    category_params = {
-        'alpine': {'species': ['PICEA', 'ABIES'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 'min_len': 150, 'min_start': 1750},
-        'baltic': {'species': ['PINUS', 'PICEA'], 'countries': ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 'min_len': 150, 'min_start': 1750},
-        'all': {'species': ['PICEA', 'ABIES', 'PINUS', 'LARIX'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov', 'finl', 'lith', 'norw', 'pola', 'swed'], 'min_len': 100, 'min_start': 1800}
-    }
-    params = category_params[category]
-    index_df = pd.read_csv(index_filename)
-    df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start'])]
-    file_list = df_filtered['filename'].tolist()
-    if not file_list: print(f"ERROR: No files in index matched criteria for '{category}'."); return
+    file_list = []
+    base_path_for_masters = ""
 
-    all_best_results = []
-    for filename in tqdm(file_list, desc=f"Testing {len(file_list)} sites in '{category}'"):
-        master_raw = parse_rwl_robust(os.path.join("full_rwl_cache", filename))
-        if master_raw.empty: continue
-        analysis_results = cross_date(sample_detrended, detrend(master_raw), min_overlap=40)
-        if "error" not in analysis_results:
-            best_match = analysis_results['best_match']; best_match['source_file'] = filename
-            all_best_results.append(best_match)
+    # --- NEW LOGIC: Check if 'category' is a directory ---
+    if os.path.isdir(category):
+        print(f"INFO: Detected '{category}' as a local folder. Using files from this directory.")
+        base_path_for_masters = category
+        file_list = [f for f in os.listdir(category) if f.lower().endswith('.rwl')]
+        if not file_list:
+            print(f"ERROR: No .rwl files were found in the folder '{category}'.")
+            return
+    else:
+        # --- OLD LOGIC: Handle predefined categories ---
+        print(f"INFO: Using predefined category '{category}' from the NOAA index.")
+        base_path_for_masters = "full_rwl_cache"
+        index_filename = "noaa_europe_index.csv"
+        if not os.path.exists(index_filename): print(f"ERROR: Index file '{index_filename}' missing."); return
+        
+        category_params = {
+            'alpine': {'species': ['PICEA', 'ABIES'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 'min_len': 150, 'min_start': 1750},
+            'baltic': {'species': ['PINUS', 'PICEA'], 'countries': ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 'min_len': 150, 'min_start': 1750},
+            'all': {'species': ['PICEA', 'ABIES', 'PINUS', 'LARIX'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov', 'finl', 'lith', 'norw', 'pola', 'swed'], 'min_len': 100, 'min_start': 1800}
+        }
+        if category not in category_params:
+            print(f"ERROR: Category '{category}' is not a valid predefined category or a local folder.")
+            return
+
+        params = category_params[category]
+        index_df = pd.read_csv(index_filename)
+        df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start'])]
+        file_list = df_filtered['filename'].tolist()
+        if not file_list: print(f"ERROR: No files in index matched criteria for '{category}'."); return
+
+    # --- The rest of the function is now generic ---
+    sample_basename = os.path.basename(sample_file)
+    tasks = [(filename, sample_detrended, sample_basename, base_path_for_masters) for filename in file_list]
+
+    print(f"Testing against {len(file_list)} sites using {multiprocessing.cpu_count()} CPU cores...")
+
+    with multiprocessing.Pool() as pool:
+        results_iterator = pool.imap(process_single_file, tasks)
+        all_best_results = [res for res in tqdm(results_iterator, total=len(tasks)) if res is not None]
 
     if not all_best_results: print("\nAnalysis complete, no correlations found."); return
+    
     results_df = pd.DataFrame(all_best_results)
     top_results = results_df.sort_values(by='t_value', ascending=False).head(top_n)
     print(f"\n--- Top {top_n} Matching Sites (Sorted by T-Value) ---")
     top_results['end_year'] = top_results['end_year'].astype(int)
     top_results['overlap_n'] = top_results['overlap_n'].astype(int)
     print(top_results[['end_year', 't_value', 'correlation', 'overlap_n', 'source_file']].to_string(index=False))
+    
     year_counts = top_results['end_year'].value_counts()
     if not year_counts.empty:
         most_likely_year, count = year_counts.index[0], year_counts.iloc[0]
         print("\n--- Conclusion ---")
         if count > 1 and top_results['t_value'].iloc[0] > 3.5:
             print(f"A consensus is forming: the year {most_likely_year} appeared {count} times.")
+            
+            sample_with_original_dates = parse_rwl_robust(sample_file, is_floating=False)
+            if not sample_with_original_dates.empty:
+                original_end_year = int(sample_with_original_dates.index.max())
+                print(f"The original file had a last ring year of: {original_end_year}")
+                if original_end_year == most_likely_year:
+                    print(f"✅ SUCCESS: The consensus finding ({most_likely_year}) MATCHES the date in the file!")
+                else:
+                    print(f"⚠️ NOTE: The consensus finding ({most_likely_year}) DOES NOT MATCH the file's date.")
         else:
             print("No clear consensus found. The chronology is likely 'floating'.")
+            
+# --- 5.Multi Thread helper ---
+def process_single_file(args):
+    """
+    Helper function for multiprocessing. Now takes a base_path for flexibility.
+    """
+    filename, sample_detrended, sample_basename, base_path = args # Unpack arguments
+
+    if filename == sample_basename:
+        return None 
+        
+    # Use the provided base_path to find the master file
+    master_path = os.path.join(base_path, filename)
+    
+    master_raw = parse_rwl_robust(master_path)
+    if master_raw.empty:
+        return None
+    
+    analysis_results = cross_date(sample_detrended, detrend(master_raw), min_overlap=40)
+    
+    if "error" in analysis_results:
+        return None
+        
+    best_match = analysis_results['best_match']
+
+    if best_match['correlation'] > 0.90:
+        return None
+
+    best_match['source_file'] = filename
+    return best_match
+
 
 # --- 5. MAIN DISPATCHER ---
 def main():
     parser = argparse.ArgumentParser(
-        description="Dendrochronology toolkit for instrument analysis (V3.6).",
+        description="Dendrochronology toolkit for instrument analysis (V3.9).",
         formatter_class=argparse.RawTextHelpFormatter
     )
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -514,9 +660,14 @@ def main():
     parser_date.add_argument('master_file', help="Path to the reference .csv or .rwl file.")
 
     # Command: detective
-    parser_detective = subparsers.add_parser('detective', help="Run a sample against ALL individual files in a category.")
+    parser_detective = subparsers.add_parser('detective', help="Run a sample against ALL individual files in a category or folder.")
     parser_detective.add_argument('sample_file', help="Path to your sample .rwl file.")
-    parser_detective.add_argument('--category', choices=['alpine', 'baltic', 'all'], default='alpine', help="Which category to test against. (Default: alpine)")
+    parser_detective.add_argument(
+        'target',
+        nargs='?',  # This makes the argument optional.
+        default='alpine', # If not provided, it will default to 'alpine'.
+        help="Reference to test against: a category ('alpine', 'baltic', 'all') or a path to a folder. (Default: alpine)"
+    )
     parser_detective.add_argument('--top_n', type=int, default=10, help="Number of top results to display. (Default: 10)")
     
     args = parser.parse_args()
@@ -532,7 +683,7 @@ def main():
     elif args.command == 'date':
         run_date_analysis(args.sample_file, args.master_file)
     elif args.command == 'detective':
-        run_detective_analysis(args.sample_file, args.category, args.top_n)
+        run_detective_analysis(args.sample_file, args.target, args.top_n)
 
 if __name__ == '__main__':
     main()
