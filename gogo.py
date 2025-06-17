@@ -1,6 +1,6 @@
-# gogo.py (Version 8.0 - Two-Stage Validation Workflow)
+# gogo.py (Version 8.4.1 - Corrected)
 # ==============================================================================
-import os, ftplib, argparse, textwrap, multiprocessing, shutil
+import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import pandas as pd, numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -8,7 +8,6 @@ from scipy.stats import pearsonr
 from scipy.interpolate import UnivariateSpline
 
 # --- 2. CORE DENDROCHRONOLOGY FUNCTIONS ---
-
 def parse_as_floating_series(file_path: str) -> pd.Series:
     """A robust parser that reads ANY rwl-like file and treats it as a floating sample."""
     all_widths = []
@@ -55,7 +54,6 @@ def _build_master_from_rwl_file(file_path: str) -> pd.Series:
     df = pd.DataFrame(all_rings).drop_duplicates(subset='year').set_index('year')
     return df['width'].dropna().sort_index()
 
-# ... All other core functions (detrend, calculate_t_value, etc.) are correct ...
 def detrend(series: pd.Series, spline_stiffness_pct: int = 67) -> pd.Series:
     series = series.dropna()
     if len(series) < 15: return pd.Series(dtype=np.float64)
@@ -139,6 +137,7 @@ def plot_results(raw_sample, master_detrended, detrended_sample, results, sample
     ax4.set_title("4. Summary Statistics")
     plt.suptitle(f"Cross-Dating Analysis: {sample_label} vs. {master_label}", fontsize=16, fontweight='bold'); plt.tight_layout(rect=[0, 0, 1, 0.96]); plt.show()
 
+
 # --- COMMAND LOGIC FUNCTIONS ---
 def get_metadata_from_rwl(file_path):
     series = _build_master_from_rwl_file(file_path)
@@ -149,61 +148,52 @@ def get_metadata_from_rwl(file_path):
         if key in header_content: return {"species": val, "start_year": int(series.index.min()), "end_year": int(series.index.max()), "length": len(series)}
     return {"species": "UNKNOWN", "start_year": int(series.index.min()), "end_year": int(series.index.max()), "length": len(series)}
 
-def download_all_files():
-    """STAGE 1: Downloads all .rwl files from NOAA FTP server without validation."""
-    print("--- Stage 1: Downloading all .rwl files from NOAA ---")
+def download_and_index_files(index_filename="noaa_europe_index.csv"):
+    print("--- Stage 1: Downloading standard .rwl files and creating index ---")
     cache_dir = "full_rwl_cache"
     os.makedirs(cache_dir, exist_ok=True)
+    standard_file_pattern = re.compile(r"^[a-zA-Z]+[0-9]+\.rwl$")
     try:
         ftp = ftplib.FTP("ftp.ncdc.noaa.gov", timeout=60); ftp.login(); ftp.cwd("/pub/data/paleo/treering/measurements/europe/")
-        file_list = [f for f in ftp.nlst() if f.lower().endswith('.rwl')]
-        print(f"Found {len(file_list)} files on server.")
+        all_server_files = ftp.nlst()
     except Exception as e: raise ConnectionError(f"FTP Error: {e}")
-
-    for filename in tqdm(file_list, desc="Downloading Files"):
+    files_to_download = []; skipped_files = []
+    for f in all_server_files:
+        if standard_file_pattern.match(f): files_to_download.append(f)
+        elif f.lower().endswith('.rwl'): skipped_files.append(f)
+    print(f"Found {len(all_server_files)} total files on server.")
+    print(f"-> {len(files_to_download)} files match standard format and will be downloaded.")
+    if skipped_files: print(f"-> {len(skipped_files)} non-standard .rwl files will be skipped (e.g., 'e', 'l', etc.).")
+    for filename in tqdm(files_to_download, desc="Downloading Standard Files"):
         local_path = os.path.join(cache_dir, filename)
         if not os.path.exists(local_path):
             try:
                 with open(local_path, 'wb') as f: ftp.retrbinary(f"RETR {filename}", f.write)
-            except Exception: continue
+            except Exception as e: print(f"Warning: Failed to download {filename}: {e}"); continue
     ftp.quit()
-    print("Download complete. Run 'python gogo.py clean' to validate and create the index.")
-
-def clean_and_index_cache(index_filename="noaa_europe_index.csv"):
-    """STAGE 2: Validates all downloaded files, quarantines bad ones, and creates the index."""
-    print("\n--- Stage 2: Cleaning cache and creating index ---")
-    cache_dir = "full_rwl_cache"
-    quarantine_dir = os.path.join(cache_dir, "unsupported_format")
-    if not os.path.isdir(cache_dir): raise FileNotFoundError(f"Cache directory '{cache_dir}' not found. Run 'python gogo.py index' first.")
-    os.makedirs(quarantine_dir, exist_ok=True)
-    
+    print("Download complete.")
+    print("\n--- Indexing downloaded files ---")
     all_metadata = []
-    file_list = [f for f in os.listdir(cache_dir) if f.lower().endswith('.rwl') and os.path.isfile(os.path.join(cache_dir, f))]
-    
-    for filename in tqdm(file_list, desc="Validating and Indexing"):
+    local_files_to_index = [f for f in os.listdir(cache_dir) if f in files_to_download]
+    for filename in tqdm(local_files_to_index, desc="Validating and Indexing"):
         local_path = os.path.join(cache_dir, filename)
-        # We use the strict, dated-only parser for validation. If it fails, the file is bad.
         metadata = get_metadata_from_rwl(local_path)
         if metadata:
             metadata['filename'] = filename
             all_metadata.append(metadata)
         else:
-            tqdm.write(f"  -> Quarantining non-standard file: {filename}")
-            shutil.move(local_path, os.path.join(quarantine_dir, filename))
-
-    if not all_metadata: raise ValueError("No valid, dated Tucson-format files could be indexed.")
+            tqdm.write(f"  -> WARNING: Downloaded file '{filename}' could not be parsed, excluded from index.")
+    if not all_metadata: raise ValueError("No valid, dated Tucson-format files could be indexed from download.")
     pd.DataFrame(all_metadata).to_csv(index_filename, index=False)
-    print(f"\nSUCCESS: Index with {len(all_metadata)} valid entries created and saved to '{index_filename}'.")
-    print(f"Unsupported files moved to '{quarantine_dir}'.")
+    print(f"\nSUCCESS: Index with {len(all_metadata)} valid entries created: '{index_filename}'.")
 
-def build_master_from_index(chronology_name, target_species, country_prefixes, min_series_length, min_start_year, index_filename="noaa_europe_index.csv"):
-    # This logic is correct now that the index is clean.
+def build_master_from_index(chronology_name, target_species, country_prefixes, min_series_length, min_start_year, min_end_year=1500, index_filename="noaa_europe_index.csv"):
     print(f"\nBUILDING: '{chronology_name}'")
-    if not os.path.exists(index_filename): raise FileNotFoundError("Index file missing. Run 'python gogo.py clean' first.")
+    if not os.path.exists(index_filename): raise FileNotFoundError("Index missing. Run 'python gogo.py index' first.")
     index_df = pd.read_csv(index_filename)
-    df_filtered = index_df[(index_df['species'].isin(target_species)) & (index_df['filename'].str.lower().str.startswith(tuple(country_prefixes))) & (index_df['length'] >= min_series_length) & (index_df['start_year'] < min_start_year)]
+    df_filtered = index_df[(index_df['species'].isin(target_species)) & (index_df['filename'].str.lower().str.startswith(tuple(country_prefixes))) & (index_df['length'] >= min_series_length) & (index_df['start_year'] < min_start_year) & (index_df['end_year'] >= min_end_year)]
     file_list = df_filtered['filename'].tolist()
-    if not file_list: raise ValueError("No files in index matched criteria.")
+    if not file_list: raise ValueError(f"No files in index matched criteria (including min_end_year={min_end_year}).")
     print(f"Found {len(file_list)} matching files. Processing...")
     all_series = [_build_master_from_rwl_file(os.path.join("full_rwl_cache", filename)) for filename in tqdm(file_list, desc=f"Building {chronology_name}")]
     all_series = [s for s in all_series if not s.empty]
@@ -215,7 +205,6 @@ def build_master_from_index(chronology_name, target_species, country_prefixes, m
     print(f"--- SUCCESS! Saved to '{output_filename}' ---")
 
 def run_create_master(input_folder, output_filename):
-    # This logic is correct.
     print(f"\nCREATING CUSTOM MASTER: {input_folder}")
     if not os.path.isdir(input_folder): raise FileNotFoundError(f"Folder '{input_folder}' does not exist.")
     file_list = [f for f in os.listdir(input_folder) if f.lower().endswith('.rwl')]
@@ -234,30 +223,27 @@ def run_create_master(input_folder, output_filename):
         print(f"--- SUCCESS! Saved to: '{output_filename}' ---")
     else: raise ValueError("Resulting chronology was empty.")
 
-def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test=False):
-    # The analysis functions from the previous final version were correct,
-    # it was the data feeding them that was wrong. This logic is restored.
+def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test=False, reverse_sample=False):
     if not is_internal_test: print(f"\n--- Running Analysis: {os.path.basename(sample_file)} vs {os.path.basename(master_file)} ---")
     sample_chrono = parse_as_floating_series(sample_file)
     if sample_chrono.empty: raise ValueError(f"Could not read data from sample file: {sample_file}")
-
+    if reverse_sample:
+        print(f"-> Reversing data for sample: {os.path.basename(sample_file)}")
+        sample_chrono = sample_chrono.iloc[::-1].reset_index(drop=True)
+        sample_chrono.index = pd.RangeIndex(start=1, stop=len(sample_chrono) + 1, name='ring_number')
     reference_is_rwl = master_file.lower().endswith('.rwl')
-    if is_internal_test:
-        master_chrono = parse_as_floating_series(master_file)
-    elif reference_is_rwl:
-        master_chrono = _build_master_from_rwl_file(master_file)
-    else:
-        master_chrono = pd.read_csv(master_file, index_col='year').squeeze("columns")
-
+    if is_internal_test: master_chrono = parse_as_floating_series(master_file)
+    elif reference_is_rwl: master_chrono = _build_master_from_rwl_file(master_file)
+    else: master_chrono = pd.read_csv(master_file, index_col='year').squeeze("columns")
     if master_chrono.empty: raise ValueError(f"Could not read data from reference file: {master_file}")
-    if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap > sample length.")
-
+    if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap ({min_overlap}) > sample length ({len(sample_chrono)}).")
     sample_detrended = detrend(sample_chrono); master_detrended = detrend(master_chrono)
     analysis_results = cross_date(sample_detrended, master_detrended, min_overlap=min_overlap)
     if "error" in analysis_results: raise ValueError(analysis_results['error'])
     if not is_internal_test: print(f"\n--- Cross-Dating Complete ---\nMost Likely End Year: {int(analysis_results['best_match']['end_year'])}")
     return {'raw_sample': sample_chrono, 'master_detrended': master_detrended, 'detrended_sample': sample_detrended, 'results': analysis_results, 'sample_filename': sample_file, 'master_filename': master_file, 'reference_is_rwl': reference_is_rwl, 'raw_master': master_chrono if not is_internal_test else None}
 
+# THIS IS THE FUNCTION THAT WAS MISSING
 def process_single_file(args):
     filename, sample_detrended, sample_basename, base_path, min_overlap = args
     if filename == sample_basename: return None
@@ -272,11 +258,15 @@ def process_single_file(args):
     best_match['source_file'] = filename
     return best_match
 
-def run_detective_analysis(sample_file, target, top_n, min_overlap=80):
+def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_year=1500, reverse_sample=False):
     print(f"\n--- Running Detective Analysis on {os.path.basename(sample_file)} ---")
     sample_chrono = parse_as_floating_series(sample_file)
     if sample_chrono.empty: raise ValueError("Could not process sample file.")
-    if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap > sample length.")
+    if reverse_sample:
+        print(f"-> Reversing data for sample: {os.path.basename(sample_file)}")
+        sample_chrono = sample_chrono.iloc[::-1].reset_index(drop=True)
+        sample_chrono.index = pd.RangeIndex(start=1, stop=len(sample_chrono) + 1, name='ring_number')
+    if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap ({min_overlap}) > sample length ({len(sample_chrono)}).")
     sample_detrended = detrend(sample_chrono)
     file_list, base_path_for_masters = [], ""
     if os.path.isdir(target):
@@ -285,15 +275,14 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80):
     else:
         base_path_for_masters = "full_rwl_cache"
         index_filename = "noaa_europe_index.csv"
-        if not os.path.exists(index_filename): raise ValueError("Index file missing. Run 'gogo clean' first.")
+        if not os.path.exists(index_filename): raise ValueError("Index file missing. Run 'gogo index' first.")
         category_params = {'alpine': {'species': ['PICEA', 'ABIES'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 'min_len': 150, 'min_start': 1750}, 'baltic': {'species': ['PINUS', 'PICEA'], 'countries': ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 'min_len': 150, 'min_start': 1750}, 'all': {'species': ['PICEA', 'ABIES', 'PINUS', 'LARIX'], 'countries': ['aust', 'fran', 'germ', 'ital', 'swit', 'slov', 'finl', 'lith', 'norw', 'pola', 'swed'], 'min_len': 100, 'min_start': 1800}}
         if target not in category_params: raise ValueError(f"Invalid category '{target}'.")
         params = category_params[target]
         index_df = pd.read_csv(index_filename)
-        df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start'])]
+        df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start']) & (index_df['end_year'] >= min_end_year)]
         file_list = df_filtered['filename'].tolist()
-
-    if not file_list: raise ValueError(f"No reference files found for target '{target}'.")
+    if not file_list: raise ValueError(f"No reference files found for target '{target}' (including min_end_year={min_end_year}).")
     tasks = [(filename, sample_detrended, os.path.basename(sample_file), base_path_for_masters, min_overlap) for filename in file_list]
     print(f"Testing against {len(file_list)} sites using {multiprocessing.cpu_count()} CPU cores...")
     with multiprocessing.Pool() as pool:
@@ -307,18 +296,26 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80):
     top_match_file_name = top_results.iloc[0]['source_file']
     top_match_full_path = os.path.join(base_path_for_masters, top_match_file_name)
     print(f"\nGenerating plot for top match: {top_match_file_name}")
-    plot_data_dict = run_date_analysis(sample_file, top_match_full_path, min_overlap=min_overlap)
+    plot_data_dict = run_date_analysis(sample_file, top_match_full_path, min_overlap=min_overlap, reverse_sample=reverse_sample)
     if not plot_data_dict:
         print("Could not generate plot for the top match.")
-        return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "results_df": top_results}
-    plot_data_dict.update({"analysis_type": "detective", "results_df": top_results})
+        return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "min_end_year": min_end_year, "results_df": top_results}
+    plot_data_dict.update({"analysis_type": "detective", "results_df": top_results, "min_end_year": min_end_year})
     return plot_data_dict
 
-def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, final_analysis_args):
+def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, final_analysis_args, reverse_bass=False, reverse_treble=False):
     print("\n--- Starting Two-Piece Mean Analysis ---")
     bass_chrono = parse_as_floating_series(bass_file)
     treble_chrono = parse_as_floating_series(treble_file)
     if bass_chrono.empty or treble_chrono.empty: raise ValueError("Could not process two-piece sample files.")
+    if reverse_bass:
+        print(f"-> Reversing data for Bass sample: {os.path.basename(bass_file)}")
+        bass_chrono = bass_chrono.iloc[::-1].reset_index(drop=True)
+        bass_chrono.index = pd.RangeIndex(start=1, stop=len(bass_chrono) + 1, name='ring_number')
+    if reverse_treble:
+        print(f"-> Reversing data for Treble sample: {os.path.basename(treble_file)}")
+        treble_chrono = treble_chrono.iloc[::-1].reset_index(drop=True)
+        treble_chrono.index = pd.RangeIndex(start=1, stop=len(treble_chrono) + 1, name='ring_number')
     print("--- Internal Cross-Match (Bass vs. Treble) ---")
     bass_detrended, treble_detrended = detrend(bass_chrono), detrend(treble_chrono)
     internal_results = cross_date(bass_detrended, treble_detrended, min_overlap=40)
@@ -345,51 +342,3 @@ def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, fin
     if not final_results: return None
     final_results.update({'analysis_mode': 'two_piece', 'internal_stats': {'t_value': internal_t, 'glk': internal_glk}, 'bass_file': bass_file, 'treble_file': treble_file, 'sample_filename': "Mean Chronology (Bass+Treble)"})
     return final_results
-    
-# --- 4. MAIN DISPATCHER ---
-def main():
-    parser = argparse.ArgumentParser(description="Dendrochronology toolkit (V8.0).", formatter_class=argparse.RawTextHelpFormatter,
-        epilog=textwrap.dedent("""
-        WORKFLOW:
-          1. python gogo.py index     (Download all files from NOAA, run once)
-          2. python gogo.py clean     (Validate files, create index, run after index or if cache changes)
-          3. python gogo.py build     (Build master chronologies from the clean index)
-          4. python gogo.py date ...  (Date a sample against a master)
-        """))
-    subparsers = parser.add_subparsers(dest='command', required=True)
-    subparsers.add_parser('index', help="STAGE 1: Download all .rwl files from the NOAA server.")
-    subparsers.add_parser('clean', help="STAGE 2: Clean the downloaded cache and create the data index.")
-    parser_build = subparsers.add_parser('build', help="Build master chronologies from the clean data index.")
-    parser_build.add_argument('--target', choices=['alpine', 'baltic', 'all'], default='all', help="Which master to build. (Default: all)")
-    parser_create = subparsers.add_parser('create', help="Create a custom master from a local folder of .rwl files.")
-    parser_create.add_argument('input_folder', help="Path to the folder containing your .rwl files.")
-    parser_create.add_argument('output_filename', help="Name for the new master .csv file (e.g., 'my_master.csv').")
-    parser_date = subparsers.add_parser('date', help='Cross-date a sample against a master or another .rwl file.')
-    parser_date.add_argument('sample_file', help="Path to your sample .rwl file.")
-    parser_date.add_argument('master_file', help="Path to the reference .csv or .rwl file.")
-    parser_date.add_argument('--min_overlap', type=int, default=50, help="Minimum overlap in years. (Default: 50)")
-    parser_detective = subparsers.add_parser('detective', help="Run a sample against ALL individual files in a category or folder.")
-    parser_detective.add_argument('sample_file', help="Path to your sample .rwl file.")
-    parser_detective.add_argument('target', nargs='?', default='alpine', help="Reference: a category ('alpine', 'baltic', 'all') or a folder path. (Default: alpine)")
-    parser_detective.add_argument('--top_n', type=int, default=10, help="Number of top results to display. (Default: 10)")
-    parser_detective.add_argument('--min_overlap', type=int, default=80, help="Minimum overlap in years to consider a match. (Default: 80)")
-    args = parser.parse_args()
-
-    try:
-        if args.command == 'index': download_all_files()
-        elif args.command == 'clean': clean_and_index_cache()
-        elif args.command == 'build':
-            if args.target in ['alpine', 'all']: build_master_from_index("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750)
-            if args.target in ['baltic', 'all']: build_master_from_index("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750)
-        elif args.command == 'create': run_create_master(args.input_folder, args.output_filename)
-        elif args.command == 'date': 
-            result = run_date_analysis(args.sample_file, args.master_file, args.min_overlap)
-            if result: plot_results(**result)
-        elif args.command == 'detective':
-            result = run_detective_analysis(args.sample_file, args.target, args.top_n, args.min_overlap)
-            if result: plot_results(**result)
-    except Exception as e:
-        print(f"\nFATAL ERROR: {e}")
-
-if __name__ == '__main__':
-    main()
