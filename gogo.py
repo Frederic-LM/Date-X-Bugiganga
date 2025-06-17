@@ -3,7 +3,7 @@
 #
 #                  GoGo-Bugiganga: a Cross-Dating Tools Set
 #
-#                           Version: 4.0 (Curator)
+#                           Version: 3.9 
 #
 # ==============================================================================
 #
