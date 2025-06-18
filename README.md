@@ -2,7 +2,7 @@
 *GoGo-Bugiganga to jump into X-Dating.*
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![License: GPL-3.0](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 
 **Date-X Bugiganga** is a professional-grade dendrochronology toolkit designed for the scientific cross-dating of tree-ring measurement series. It combines a powerful command-line interface (CLI) for batch processing and a user-friendly graphical user interface (GUI) for interactive analysis.
 
