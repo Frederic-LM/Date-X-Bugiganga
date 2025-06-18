@@ -1,17 +1,36 @@
-# gogo.py (Version 9.0 - Final Stable Release)
+# gogo.py (Version 9.1 - Smart Reporting Backend)
 # ==============================================================================
 import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import warnings
-from typing import Tuple # For backwards compatibility with Python < 3.9
+from typing import Tuple
 import pandas as pd, numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 from scipy.interpolate import UnivariateSpline
 
-# This filters by the warning message text, which is stable across library versions.
 warnings.filterwarnings("ignore", message="The maximal number of iterations")
-# --- 2. CORE DENDROCHRONOLOGY FUNCTIONS ---
+
+def _parse_rwl_header(file_path: str) -> dict:
+    """Parses the first 3 lines of an RWL file to extract metadata."""
+    header_info = {'site_name': 'N/A', 'location': 'N/A', 'pi': 'N/A', 'collector': 'N/A'}
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = [f.readline() for _ in range(3)]
+        if len(lines) >= 3:
+            header_info['site_name'] = lines[0][12:55].strip()
+            header_info['location'] = lines[1][12:55].strip()
+            pi_collector = lines[2][12:55].strip().split()
+            # This is a heuristic guess as the format varies
+            if len(pi_collector) > 1:
+                header_info['pi'] = pi_collector[0]
+                header_info['collector'] = ' '.join(pi_collector[1:])
+            elif len(pi_collector) == 1:
+                header_info['collector'] = pi_collector[0]
+    except Exception:
+        pass # Fail silently, return defaults
+    return header_info
+
 def parse_as_floating_series(file_path: str) -> pd.Series:
     all_widths = [];
     try:
@@ -57,8 +76,7 @@ def _build_master_from_rwl_file(file_path: str) -> pd.Series:
 
 def detrend(series: pd.Series, spline_stiffness_pct: int = 67) -> Tuple[pd.Series, pd.Series]:
     series = series.dropna()
-    if len(series) < 15:
-        return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
+    if len(series) < 15: return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
     x, y = series.index.values, series.values
     s = len(series) * (spline_stiffness_pct / 100)**3
     spline = UnivariateSpline(x, y, s=s)
@@ -114,7 +132,6 @@ def plot_results(raw_sample, master_detrended, detrended_sample, results, sample
     sample_index_at_best = pd.RangeIndex(start=best_start_year, stop=best_end_year + 1)
     overlap_index = master_detrended.index.intersection(sample_index_at_best)
     overlap_start_year, overlap_end_year = (overlap_index.min(), overlap_index.max()) if not overlap_index.empty else (best_start_year, best_end_year)
-   # fig = plt.figure(figsize=(16, 12)); plt.style.use('seaborn-v0_8-whitegrid')
     fig = plt.figure(figsize=(21, 10)); plt.style.use('seaborn-v0_8-whitegrid')
     sample_label, master_label = os.path.basename(sample_filename), os.path.basename(master_filename)
     ax1 = plt.subplot(2, 2, 1); ax1.plot(all_correlations.index, all_correlations['t_value'], color='gray', zorder=1, label=f'All Offsets (Best t={t_val:.2f})')
@@ -171,10 +188,11 @@ def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test
     if "error" in analysis_results: raise ValueError(analysis_results['error'])
     if not is_internal_test: print(f"\n--- Cross-Dating Complete ---\nMost Likely End Year: {int(analysis_results['best_match']['end_year'])}")
     
+    # Pass back the reverse flag for the smart report
     return {'raw_sample': sample_chrono, 'master_detrended': master_detrended, 'detrended_sample': sample_detrended, 
             'results': analysis_results, 'sample_filename': sample_file, 'master_filename': master_file, 
             'reference_is_rwl': reference_is_rwl, 'raw_master': master_chrono if not is_internal_test else None,
-            'sample_spline_fit': sample_spline_fit}
+            'sample_spline_fit': sample_spline_fit, 'reverse_sample': reverse_sample}
 
 def process_single_file(args):
     filename, sample_detrended, sample_basename, base_path, min_overlap, spline_stiffness_pct = args
@@ -222,17 +240,23 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
     if not all_best_results: print("\nAnalysis complete, no significant correlations found."); return None
     results_df = pd.DataFrame(all_best_results).sort_values(by='t_value', ascending=False)
     top_results = results_df.head(top_n)
+    
+    # --- NEW: Enrich results with header info for the report ---
+    header_infos = [_parse_rwl_header(os.path.join(base_path_for_masters, row.source_file)) for _, row in top_results.iterrows()]
+    header_df = pd.DataFrame(header_infos, index=top_results.index)
+    enriched_results_df = pd.concat([top_results, header_df], axis=1)
+
     print(f"\n--- Top {top_n} Matching Sites (Sorted by T-Value) ---")
-    top_results_display = top_results.copy(); top_results_display['glk'] = top_results_display['glk'].round(1)
-    print(top_results_display[['end_year', 't_value', 'glk', 'correlation', 'overlap_n', 'source_file']].to_string(index=False))
+    print(top_results[['end_year', 't_value', 'glk', 'correlation', 'overlap_n', 'source_file']].to_string(index=False))
+    
     top_match_file_name = top_results.iloc[0]['source_file']
     top_match_full_path = os.path.join(base_path_for_masters, top_match_file_name)
     print(f"\nGenerating plot for top match: {top_match_file_name}")
     plot_data_dict = run_date_analysis(sample_file, top_match_full_path, min_overlap=min_overlap, reverse_sample=reverse_sample, spline_stiffness_pct=spline_stiffness_pct)
     if not plot_data_dict:
         print("Could not generate plot for the top match.")
-        return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "min_end_year": min_end_year, "results_df": top_results}
-    plot_data_dict.update({"analysis_type": "detective", "results_df": top_results, "min_end_year": min_end_year})
+        return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "min_end_year": min_end_year, "enriched_results_df": enriched_results_df}
+    plot_data_dict.update({"analysis_type": "detective", "enriched_results_df": enriched_results_df, "min_end_year": min_end_year})
     return plot_data_dict
 
 def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, final_analysis_args, reverse_bass=False, reverse_treble=False, spline_stiffness_pct=67):
@@ -273,12 +297,13 @@ def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, fin
     final_results = final_analysis_func(*final_analysis_args)
     if os.path.exists(temp_mean_file): os.remove(temp_mean_file)
     if not final_results: return None
-    final_results.update({'analysis_mode': 'two_piece', 'internal_stats': {'t_value': internal_t, 'glk': internal_glk}, 'bass_file': bass_file, 'treble_file': treble_file, 'sample_filename': "Mean Chronology (Bass+Treble)"})
+    # Add all necessary info for the smart report
+    final_results.update({'analysis_mode': 'two_piece', 'internal_stats': {'t_value': internal_t, 'glk': internal_glk}, 
+                           'bass_file': bass_file, 'treble_file': treble_file, 'sample_filename': "Mean Chronology (Bass+Treble)",
+                           'mean_series_length': len(mean_chrono_series), 'reverse_bass': reverse_bass, 'reverse_treble': reverse_treble})
     return final_results
 
-# --- COMMAND LOGIC (CONTINUED) ---
-
-# All the functions you already have (parse_as_floating_series, detrend, run_two_piece_mean_analysis, etc.) go before this.
+# --- COMMAND LOGIC ---
 
 def download_and_index_files(index_filename="noaa_europe_index.csv"):
     print("--- Stage 1: Downloading standard .rwl files and creating index ---")
