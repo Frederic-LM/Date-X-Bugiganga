@@ -1,4 +1,4 @@
-# Date-X.py (Version 8.9 - Compatibility & Bug Fix)
+# gogo_gui.py (Version 9.6 - Streamlined Reporting Workflow)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -27,38 +27,26 @@ class App(tk.Tk):
         main_container = ttk.Frame(self)
         main_container.pack(expand=True, fill="both", padx=10, pady=5)
         main_container.grid_rowconfigure(0, weight=1)
-        # Give the left pane (controls) more weight so it expands more
         main_container.grid_columnconfigure(0, weight=3)
         main_container.grid_columnconfigure(1, weight=2)
-
-        # Create the left and right frames
         self.left_pane = ttk.Frame(main_container)
         self.right_pane = ttk.Frame(main_container)
         self.left_pane.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         self.right_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
     def __init__(self):
         super().__init__()
-        self.title("GoGo Dendro-Dating Tool v9.1") # Version bump
-        self.geometry("1450x550") # A better default size for a horizontal layout
+        self.title("GoGo Dendro-Dating Tool v9.6") # Version bump
+        self.geometry("1450x550")
         self.settings_file = "gogo_settings.json"
-        
         self.last_analysis_results = None
         self.plot_queue = queue.Queue()
-        
-        # --- MODIFIED SECTION ---
-        # Call the new layout method FIRST to create the panes
         self._create_main_layout()
-
-        # The notebook and report widget now go in the LEFT pane
         self.notebook = ttk.Notebook(self.left_pane)
         self.notebook.pack(pady=5, padx=0, expand=True, fill="both")
         self._create_tabs()
         self._create_report_widget(parent=self.left_pane)
-
-        # The log widget now goes in the RIGHT pane
         self._create_log_widget(parent=self.right_pane)
-        # --- END MODIFIED SECTION ---
-
         self.load_settings()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.check_plot_queue()
@@ -94,7 +82,6 @@ class App(tk.Tk):
         else:
             reverse_bass = self.date_reverse_sample_var.get(); reverse_treble = self.date_reverse_treble_var.get()
             final_args = ["placeholder", master, min_overlap, False, False, stiffness_pct]
-            # MODIFIED: Pass stiffness_pct to the two-piece analysis function itself
             self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_date_analysis, final_args, reverse_bass, reverse_treble, stiffness_pct), run_button, is_analysis=True)
 
     def _run_detective(self):
@@ -124,11 +111,8 @@ class App(tk.Tk):
         else:
             reverse_bass = self.detective_reverse_sample_var.get(); reverse_treble = self.detective_reverse_treble_var.get()
             final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False, stiffness_pct]
-            # MODIFIED: Pass stiffness_pct to the two-piece analysis function itself
             self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_detective_analysis, final_args, reverse_bass, reverse_treble, stiffness_pct), run_button, is_analysis=True)
             
-    # The rest of the GUI file is identical to version 8.7 and does not need to be changed.
-    # ... (on_closing, save_settings, etc. ... all the way to the end)
     def on_closing(self):
         print("Saving settings..."); self.save_settings(); self.destroy()
     def save_settings(self):
@@ -157,7 +141,7 @@ class App(tk.Tk):
     def _run_in_thread(self, target_func, args, button_to_disable, is_analysis=False):
         def thread_target():
             if button_to_disable: self.after(0, lambda: button_to_disable.config(state=tk.DISABLED))
-            if is_analysis: self.after(0, lambda: self.generate_report_button.config(state=tk.DISABLED))
+            if is_analysis: self.after(0, lambda: self.save_report_button.config(state=tk.DISABLED))
             try:
                 result = target_func(*args)
                 if is_analysis and result:
@@ -165,7 +149,12 @@ class App(tk.Tk):
                     if 'raw_sample' in result:
                         plot_args = {k: v for k, v in result.items() if k in plot_results.__code__.co_varnames}
                         self.plot_queue.put(plot_args)
-                    self.after(0, lambda: self.generate_report_button.config(state=tk.NORMAL))
+                    self.after(0, lambda: self.save_report_button.config(state=tk.NORMAL))
+                    
+                    # --- NEW: Auto-print report to log ---
+                    report_content = self._create_report_content()
+                    if report_content:
+                        self.after(0, lambda: print("\n\n" + "="*70 + "\n           AUTOMATICALLY GENERATED REPORT\n" + "="*70 + "\n" + report_content))
             except Exception as e:
                 error_message = f"An error occurred:\n\n{e}"
                 print(f"\n--- ERROR ---\n{error_message}")
@@ -179,14 +168,13 @@ class App(tk.Tk):
         self._create_master_tab()
         self._create_index_build_tab()
         self._create_methodology_tab()
-    def _create_report_widget(self, parent): # MODIFIED: Accepts a parent
-        report_frame = ttk.LabelFrame(parent, text="Report Generation") # MODIFIED: Uses parent
+    def _create_report_widget(self, parent):
+        report_frame = ttk.LabelFrame(parent, text="Report Generation")
         report_frame.pack(pady=5, padx=0, fill="x")
-        self.generate_report_button = ttk.Button(report_frame, text="Generate Text Report...", command=self._generate_report, state=tk.DISABLED)
-        self.generate_report_button.pack(pady=5)
-
-    def _create_log_widget(self, parent): # MODIFIED: Accepts a parent
-        log_frame = ttk.LabelFrame(parent, text="Output Log") # MODIFIED: Uses parent
+        self.save_report_button = ttk.Button(report_frame, text="Save Text Report...", command=self._save_report, state=tk.DISABLED)
+        self.save_report_button.pack(pady=5)
+    def _create_log_widget(self, parent):
+        log_frame = ttk.LabelFrame(parent, text="Output Log")
         log_frame.pack(pady=5, padx=0, expand=True, fill="both")
         self.log_widget = tk.Text(log_frame, height=10, wrap=tk.WORD, state=tk.DISABLED)
         self.log_widget.pack(expand=True, fill="both", padx=5, pady=5)
@@ -320,40 +308,33 @@ class App(tk.Tk):
             FROM THE OUTER EDGE (Ring 1) INWARDS TO THE CENTER JOINT (Final Ring).
             If you have measured in the opposite direction, use the "Reverse" checkbox.
 
-            --- COMPARISON OF DETRENDING METHODS ---
-            The goal of detrending is to remove the biological age trend to isolate the climate signal needed for dating. This software exclusively uses the Cubic Smoothing Spline, as it is superior to older methods for this specific task.
+            --- DETRENDING METHOD ---
+            This software exclusively uses the Cubic Smoothing Spline for detrending. This is the modern standard for its flexibility in modeling real-world growth patterns without the endpoint instability issues found in older methods like polynomials. The stiffness of the spline can be adjusted:
+            • Standard (67%): The scientific default, best for general-purpose dating (Cook & Peters, 1981).
+            • Stiff (80%): A less flexible spline, better for "sensitive" trees that have a weak age trend but a strong climate signal, preventing the removal of the signal itself.
 
-            • Negative Exponential / Linear Regression: These methods fit a rigid, pre-defined curve. They fail if the tree's growth does not match this ideal shape (e.g., in cases of suppression and release common in Alpine forests).
+            --- STATISTICAL VALIDATION: A MULTI-DIMENSIONAL APPROACH ---
+            To determine the strength of a tree-ring match, this method uses three key metrics simultaneously, as a simple t-value can be misleading.
 
-            • Polynomial: While more flexible, these curves are notoriously unstable at the endpoints of the series, which is a critical flaw for reliable dating.
+            1. t-value (Baillie-Pilcher): Measures statistical similarity.
+            2. Overlap (Years): The number of shared rings; longer overlaps provide more reliable matches.
+            3. Gleichläufigkeit (%): A classical German statistic measuring agreement in year-to-year growth direction (Eckstein & Bauch, 1969).
 
-            • Cubic Smoothing Spline (This Tool's Method): This is the modern standard. It is highly flexible, allowing it to accurately model complex, real-world growth patterns without making assumptions. It does not suffer from the endpoint instability of polynomials, making it the most robust choice.
+            This approach ensures matches are statistically significant, biologically meaningful, and visually consistent—crucial for high-stakes applications like dating antique instruments.
 
-            --- DETRENDING STIFFNESS OPTIONS ---
-            • Standard (67%): The scientific default, best for general-purpose dating. It is flexible and excellent at removing strong age trends. (See Cook & Peters, 1981).
+            --- CLASSIFICATION THRESHOLDS ---
 
-            • Stiff (80%): A less flexible spline, better for "sensitive" trees (like high-altitude Alpine spruce) that have a weak age trend but a strong climate signal. The stiffer spline is less likely to accidentally remove the climate signal itself.
+            - Very Strong Match:
+                T ≥ 7.0, Overlap ≥ 80 years, and Gleichläufigkeit ≥ 70%
 
-            --- STATISTICAL VALIDATION ---
-            • Student's T-Value: The primary statistic for determining a match. It combines the correlation coefficient (r) with the length of the overlap (n). Its power comes from the "Student's" t-distribution, which is specifically designed for small sample sizes, making it more reliable than correlation alone. (See Baillie & Pilcher, 1973).
-                - T > 3.5 is a significant match.
-                - T > 5.0 is a very strong and reliable match.
+            - Strong Match:
+                T ≥ 6.0, Overlap ≥ 70 years, and Gleichläufigkeit ≥ 65%
 
-            • GLK (Gleichläufigkeit): A classical German statistic measuring the percentage of years where two series move in the same direction. High GLK (>65%) provides excellent secondary confirmation. (See Eckstein & Bauch, 1969).
+            - Significant Match:
+                T ≥ 5.0, Overlap ≥ 50 years, and Gleichläufigkeit ≥ 60%
 
-            --- EXPLICIT FORMULAS ---
-            1. Spline Smoothing Factor (s):
-            The stiffness of the detrending spline is controlled by `s`, calculated from the stiffness percentage (`p`) and series length (`n`):
-                s = n * (p / 100)^3
-
-            2. Student's T-Value (t):
-            Converts the Pearson correlation `r` into a significance score based on the overlap length `n`:
-                t = r * sqrt( (n - 2) / (1 - r^2) )
-
-            3. Gleichläufigkeit (GLK):
-            The percentage of agreement in the sign of the first difference of two series (`x` and `y`):
-                Agreement = sum( sign(x[i] - x[i-1]) == sign(y[i] - y[i-1]) )
-                GLK = (Agreement / (n - 1)) * 100
+            - Tentative/Insufficient Match:
+                Any case failing to meet all three criteria for a "Significant Match". A high T-value with a low overlap or low Gleichläufigkeit is not considered a reliable match.
 
             --- KEY SCIENTIFIC REFERENCES ---
             • Baillie, M.G.L. & Pilcher, J.R. (1973). "A simple cross-dating program for tree-ring research." Tree-Ring Bulletin 33, 7-14.
@@ -423,46 +404,139 @@ class App(tk.Tk):
             self._run_in_thread(build_master_from_index, ("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750, min_end_year), self.build_button)
         if target in ['baltic', 'all']: 
             self._run_in_thread(build_master_from_index, ("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750, min_end_year), self.build_button)
-    def _generate_report(self):
-        if not self.last_analysis_results: messagebox.showerror("Error", "No analysis data found."); return
-        res = self.last_analysis_results
-        report_lines = ["="*70, "         DENDROCHRONOLOGICAL ANALYSIS REPORT", "="*70, f"ANALYSIS DATE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
-        if res.get('analysis_mode') == 'two_piece':
-            report_lines.append("--- 1. SAMPLE INFORMATION ---")
-            report_lines.append(f"Analysis Mode: Two-Piece Mean")
-            report_lines.append(f"  Bass Side:   {os.path.basename(res['bass_file'])}")
-            report_lines.append(f"  Treble Side: {os.path.basename(res['treble_file'])}\n")
-            report_lines.append("--- 2. INTERNAL CROSS-MATCHING OF SAMPLES ---")
-            stats = res['internal_stats']
-            report_lines.append(f"  Result: Strong Match Found (t > 6.0)")
-            report_lines.append(f"  T-Value:              {stats['t_value']:.2f}")
-            report_lines.append(f"  Gleichläufigkeit (Glk): {stats.get('glk', 0.0):.1f}%\n")
-            report_lines.append("--- 3. FINAL ANALYSIS OF MEAN CHRONOLOGY ---")
+    
+    def _classify_dendro_match(self, t_value, overlap_years, gleich_percent):
+        """Classify match strength based on multi-dimensional thresholds."""
+        if t_value >= 7.0 and overlap_years >= 80 and gleich_percent >= 70:
+            return "Very Strong Match"
+        elif t_value >= 6.0 and overlap_years >= 70 and gleich_percent >= 65:
+            return "Strong Match"
+        elif t_value >= 5.0 and overlap_years >= 50 and gleich_percent >= 60:
+            return "Significant Match"
         else:
-            report_lines.append("--- 1. SAMPLE INFORMATION ---")
-            report_lines.append(f"Analysis Mode: Single Sample")
-            report_lines.append(f"  Sample File: {os.path.basename(res.get('sample_file') or res.get('sample_filename'))}\n")
-            report_lines.append("--- 2. FINAL ANALYSIS RESULTS ---")
+            return "Tentative/Insufficient Match"
+
+    def _create_report_content(self):
+        """Generates the full report string based on the last analysis."""
+        if not self.last_analysis_results:
+            return ""
+
+        res = self.last_analysis_results
+        paragraphs = []
+
+        # Paragraph 1: Physical Description
+        is_two_piece = res.get('analysis_mode') == 'two_piece'
+        physical_desc = f"The belly appears to be constructed from {'two sections' if is_two_piece else 'one section'}."
+
+        if is_two_piece:
+            bass_rev, treble_rev = res.get('reverse_bass', False), res.get('reverse_treble', False)
+            if bass_rev and treble_rev: orientation_desc = "Both halves were measured from the centre joint outwards."
+            elif bass_rev: orientation_desc = "The bass side was measured from the centre joint outwards, and the treble side from the outer edge inwards."
+            elif treble_rev: orientation_desc = "The treble side was measured from the centre joint outwards, and the bass side from the outer edge inwards."
+            else: orientation_desc = "Both halves were measured from the outer edge inwards, which is the standard orientation."
+        else:
+            orientation_desc = "The sample was measured from the centre joint outwards." if res.get('reverse_sample', False) else "The sample was measured from the outer edge inwards, which is the standard orientation."
+        
+        physical_desc += " " + orientation_desc
+        ring_count = res.get('mean_series_length') if is_two_piece else len(res.get('raw_sample', []))
+        physical_desc += f" The {'final mean chronology' if is_two_piece else 'sample'} contains {ring_count} rings."
+        paragraphs.append(physical_desc)
+
+        # Paragraph 2: Dating Result
+        best_match = res.get('results', {}).get('best_match', {})
+        if best_match:
+            t_value, overlap, glk = best_match.get('t_value', 0.0), best_match.get('overlap_n', 0), best_match.get('glk', 0.0)
+            classification = self._classify_dendro_match(t_value, overlap, glk)
+            end_year = int(best_match.get('end_year', 0))
+
+            if classification != "Tentative/Insufficient Match":
+                dating_result = f"Dendrochronological analysis indicates a felling date for the tree after the growing season of {end_year}. This conclusion is supported by a '{classification}' classification based on the multi-dimensional criteria (T-value: {t_value:.2f}, Overlap: {overlap} yrs, GLK: {glk:.1f}%)."
+            else:
+                dating_result = f"Analysis suggests a potential end year of {end_year} (T-value: {t_value:.2f}, Overlap: {overlap} yrs, GLK: {glk:.1f}%). However, this is classified as a 'Tentative/Insufficient Match' because it fails to meet the required thresholds for a conclusive scientific date. This result should be considered a proposal requiring further evidence."
+            paragraphs.append(dating_result)
+        else:
+            paragraphs.append("Dating analysis did not produce a statistically significant result.")
+
+        # Paragraph 3: Two-Piece Confirmation
+        if is_two_piece:
+            internal_t = res.get('internal_stats', {}).get('t_value', 0.0)
+            if internal_t >= 6.0:
+                paragraphs.append(f"The two halves of the belly show a very strong internal cross-match (T-value = {internal_t:.2f}), confirming they likely originate from the same tree. They were subsequently combined into a single mean series for the final dating analysis.")
+
+        # Paragraphs 4 & 5: Reference Context and Geographic Conclusion
         if res.get('analysis_type') == 'detective':
-            report_lines.append(f"Reference Target: {res['target']}")
-            report_lines.append(f"Minimum Overlap: {res['min_overlap']} years")
-            report_lines.append(f"Sites Ending Before {res.get('min_end_year', 1500)} Were Excluded.\n")
-            df = res['results_df'][['end_year', 't_value', 'glk', 'correlation', 'overlap_n', 'source_file']]
-            report_lines.append(df.to_string(index=False))
-        else: 
-            best = res['results']["best_match"]
-            report_lines.append(f"Reference: {os.path.basename(res['master_filename'])}\n")
-            report_lines.append(f"Most Likely End Year: {int(best['end_year'])}")
-            report_lines.append(f"  T-Value:              {best['t_value']:.2f}")
-            report_lines.append(f"  Gleichläufigkeit (Glk): {best.get('glk', 0.0):.1f}%")
-            report_lines.append(f"  Correlation (r):      {best['correlation']:.4f}")
-            report_lines.append(f"  Overlap (n):          {int(best['overlap_n'])} years")
-        report_lines.extend(["\n\n--- NOTES & INTERPRETATION (User editable) ---", "\n[Enter qualitative analysis and conclusions here...]\n"])
-        report_content = "\n".join(report_lines)
-        report_filename = filedialog.asksaveasfilename(initialfile="dendro_report.txt", defaultextension=".txt", filetypes=(("Text Files", "*.txt"), ("All files", "*.*")))
+            df = res.get('enriched_results_df')
+            if df is not None and not df.empty:
+                top_match = df.iloc[0].to_dict()
+                context_lines = ["The analysis was performed against a database of regional chronologies. The top matching reference sites are:"]
+                for i in range(min(5, len(df))):
+                    row = df.iloc[i]
+                    site_info = f"{row.get('location', 'Unknown Location').strip()} ({row.get('site_name', 'Unknown Site').strip()})"
+                    context_lines.append(f"  - {site_info} (T={row.get('t_value', 0.0):.2f}, O={row.get('overlap_n', 0)}, G={row.get('glk', 0.0):.1f}%)")
+                paragraphs.append("\n".join(context_lines))
+
+                t, o, g = top_match.get('t_value',0), top_match.get('overlap_n',0), top_match.get('glk',0)
+                top_classification = self._classify_dendro_match(t, o, g)
+                top_location = top_match.get('location', 'N/A').strip()
+                
+                if top_location != 'N/A' and top_location:
+                    if top_classification != "Tentative/Insufficient Match":
+                        geo_conclusion = f"The strongest alignment is classified as a '{top_classification}' with a chronology from {top_location}. This strongly suggests a probable geographic origin for the instrument's wood in or around this region."
+                    else:
+                        geo_conclusion = f"The top alignment in the database is with a site from {top_location}. However, this is classified as a 'Tentative/Insufficient Match' and cannot be used to confidently assign a geographic origin."
+                    paragraphs.append(geo_conclusion)
+            else:
+                 paragraphs.append("Detective analysis was run, but no significantly matching reference sites were found in the target database.")
+        else:
+            paragraphs.append(f"The sample was dated against the single reference chronology: {os.path.basename(res.get('master_filename', 'N/A'))}.")
+
+        # Final Assembly
+        title = "DENDROCHRONOLOGICAL ANALYSIS REPORT"
+        header = f"{'='*70}\n{title:^70}\n{'='*70}\nANALYSIS DATE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report_body = "\n\n".join(paragraphs)
+        return header + report_body
+
+    def _save_report(self):
+        """Saves the generated text report to a file."""
+        if not self.last_analysis_results:
+            messagebox.showerror("Error", "No analysis data to save. Please run an analysis first.")
+            return
+
+        res = self.last_analysis_results
+        
+        # --- Determine default save path and filename ---
+        if res.get('analysis_mode') == 'two_piece':
+            sample_path = res.get('bass_file')
+        else:
+            sample_path = res.get('sample_filename')
+
+        if sample_path and os.path.exists(sample_path):
+            default_dir = os.path.dirname(sample_path)
+            base_name = os.path.basename(sample_path)
+            filename_sans_ext, _ = os.path.splitext(base_name)
+            default_filename = f"dendro_report_{filename_sans_ext}.txt"
+        else:
+            default_dir = os.getcwd()
+            default_filename = "dendro_report.txt"
+
+        report_content = self._create_report_content()
+        if not report_content:
+            messagebox.showerror("Error", "Could not generate report content.")
+            return
+
+        report_filename = filedialog.asksaveasfilename(
+            initialdir=default_dir,
+            initialfile=default_filename,
+            defaultextension=".txt",
+            filetypes=(("Text Files", "*.txt"), ("All files", "*.*"))
+        )
         if report_filename:
-            with open(report_filename, 'w') as f: f.write(report_content)
-            print(f"Report saved to {report_filename}")
+            try:
+                with open(report_filename, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                print(f"Report saved to {report_filename}")
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Failed to save report file:\n{e}")
 
 if __name__ == "__main__":
     app = App()
