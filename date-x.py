@@ -1,4 +1,4 @@
-# gogo_gui.py (Version 8.7 - Final Comprehensive Methods)
+# gogo_gui.py (Version 8.9 - Compatibility & Bug Fix)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -11,8 +11,8 @@ try:
         run_date_analysis, run_detective_analysis, plot_results,
         run_two_piece_mean_analysis, parse_as_floating_series
     )
-except ImportError:
-    messagebox.showerror("Error", "Could not find gogo.py. Please ensure it's in the same directory.")
+except ImportError as e:
+    messagebox.showerror("Import Error", f"Could not import from gogo.py. Please ensure it is in the same directory and contains no syntax errors.\n\nDetails: {e}")
     sys.exit(1)
 
 class TextRedirector:
@@ -22,21 +22,42 @@ class TextRedirector:
 
 class App(tk.Tk):
     DEFAULT_OVERLAP_PERCENTAGE = 0.8
+    def _create_main_layout(self):
+        """Creates the main left/right pane structure for the GUI."""
+        main_container = ttk.Frame(self)
+        main_container.pack(expand=True, fill="both", padx=10, pady=5)
+        main_container.grid_rowconfigure(0, weight=1)
+        # Give the left pane (controls) more weight so it expands more
+        main_container.grid_columnconfigure(0, weight=3)
+        main_container.grid_columnconfigure(1, weight=2)
 
+        # Create the left and right frames
+        self.left_pane = ttk.Frame(main_container)
+        self.right_pane = ttk.Frame(main_container)
+        self.left_pane.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.right_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
     def __init__(self):
         super().__init__()
-        self.title("GoGo Dendro-Dating Tool v8.7")
-        self.geometry("850x800")
+        self.title("GoGo Dendro-Dating Tool v9.1") # Version bump
+        self.geometry("1450x550") # A better default size for a horizontal layout
         self.settings_file = "gogo_settings.json"
         
         self.last_analysis_results = None
         self.plot_queue = queue.Queue()
         
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(pady=5, padx=10, expand=True, fill="both")
+        # --- MODIFIED SECTION ---
+        # Call the new layout method FIRST to create the panes
+        self._create_main_layout()
+
+        # The notebook and report widget now go in the LEFT pane
+        self.notebook = ttk.Notebook(self.left_pane)
+        self.notebook.pack(pady=5, padx=0, expand=True, fill="both")
         self._create_tabs()
-        self._create_report_widget()
-        self._create_log_widget()
+        self._create_report_widget(parent=self.left_pane)
+
+        # The log widget now goes in the RIGHT pane
+        self._create_log_widget(parent=self.right_pane)
+        # --- END MODIFIED SECTION ---
 
         self.load_settings()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -47,13 +68,72 @@ class App(tk.Tk):
         try: return int(value_str.split('(')[1].split('%')[0])
         except (IndexError, ValueError): return 67
 
+    def _run_date(self):
+        analysis_type = self.date_type_var.get()
+        if analysis_type == "single":
+            sample = self.date_sample_entry.get()
+            if not sample or not os.path.exists(sample): messagebox.showerror("Error", "Please select a valid sample file."); return
+            sample_len = self._get_rwl_length(sample)
+            if 0 < sample_len <= 60:
+                messagebox.showwarning("Short Sample Warning", f"The sample '{os.path.basename(sample)}' has {sample_len} rings (60 or fewer).\n\nDating may be statistically unreliable due to the short length.")
+        else:
+            bass, treble = self.date_sample_entry.get(), self.date_treble_entry.get()
+            if not bass or not os.path.exists(bass) or not treble or not os.path.exists(treble): messagebox.showerror("Error", "Please select valid files for both Bass and Treble sides."); return
+            bass_len, treble_len = self._get_rwl_length(bass), self._get_rwl_length(treble)
+            if (0 < bass_len <= 60) or (0 < treble_len <= 60):
+                messagebox.showwarning("Short Sample Warning", f"One or both samples have 60 or fewer rings (Bass: {bass_len}, Treble: {treble_len}).\n\nDating may be statistically unreliable.")
+        
+        run_button = self.notebook.nametowidget(self.notebook.select()).winfo_children()[-1]
+        min_overlap = int(self.date_min_overlap_spinbox.get())
+        master = self.date_master_entry.get()
+        stiffness_pct = self._get_stiffness_from_string(self.date_stiffness_combo.get())
+        if not master: messagebox.showerror("Error", "Please select a reference file."); return
+        if analysis_type == "single":
+            reverse_sample = self.date_reverse_sample_var.get()
+            self._run_in_thread(run_date_analysis, (sample, master, min_overlap, False, reverse_sample, stiffness_pct), run_button, is_analysis=True)
+        else:
+            reverse_bass = self.date_reverse_sample_var.get(); reverse_treble = self.date_reverse_treble_var.get()
+            final_args = ["placeholder", master, min_overlap, False, False, stiffness_pct]
+            # MODIFIED: Pass stiffness_pct to the two-piece analysis function itself
+            self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_date_analysis, final_args, reverse_bass, reverse_treble, stiffness_pct), run_button, is_analysis=True)
+
+    def _run_detective(self):
+        analysis_type = self.detective_type_var.get()
+        if analysis_type == "single":
+            sample = self.detective_sample_entry.get()
+            if not sample or not os.path.exists(sample): messagebox.showerror("Error", "Please select a valid sample file."); return
+            sample_len = self._get_rwl_length(sample)
+            if 0 < sample_len <= 60:
+                messagebox.showwarning("Short Sample Warning", f"The sample '{os.path.basename(sample)}' has {sample_len} rings (60 or fewer).\n\nDating may be statistically unreliable due to the short length.")
+        else:
+            bass, treble = self.detective_sample_entry.get(), self.detective_treble_entry.get()
+            if not bass or not os.path.exists(bass) or not treble or not os.path.exists(treble): messagebox.showerror("Error", "Please select valid files for both Bass and Treble sides."); return
+            bass_len, treble_len = self._get_rwl_length(bass), self._get_rwl_length(treble)
+            if (0 < bass_len <= 60) or (0 < treble_len <= 60):
+                messagebox.showwarning("Short Sample Warning", f"One or both samples have 60 or fewer rings (Bass: {bass_len}, Treble: {treble_len}).\n\nDating may be statistically unreliable.")
+
+        run_button = self.notebook.nametowidget(self.notebook.select()).winfo_children()[-1]
+        if self.detective_target_var.get() == "category": target = self.detective_category_combo.get()
+        else: target = self.detective_folder_entry.get()
+        if not target: messagebox.showerror("Error", "Please select a target category or folder."); return
+        top_n = int(self.detective_top_n_spinbox.get()); min_overlap = int(self.detective_min_overlap_spinbox.get()); min_end_year = int(self.detective_min_end_year_spinbox.get())
+        stiffness_pct = self._get_stiffness_from_string(self.detective_stiffness_combo.get())
+        if analysis_type == "single":
+            reverse_sample = self.detective_reverse_sample_var.get()
+            self._run_in_thread(run_detective_analysis, (sample, target, top_n, min_overlap, min_end_year, reverse_sample, stiffness_pct), run_button, is_analysis=True)
+        else:
+            reverse_bass = self.detective_reverse_sample_var.get(); reverse_treble = self.detective_reverse_treble_var.get()
+            final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False, stiffness_pct]
+            # MODIFIED: Pass stiffness_pct to the two-piece analysis function itself
+            self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_detective_analysis, final_args, reverse_bass, reverse_treble, stiffness_pct), run_button, is_analysis=True)
+            
+    # The rest of the GUI file is identical to version 8.7 and does not need to be changed.
+    # ... (on_closing, save_settings, etc. ... all the way to the end)
     def on_closing(self):
         print("Saving settings..."); self.save_settings(); self.destroy()
-
     def save_settings(self):
         settings = {'date_sample': self.date_sample_entry.get(), 'date_master': self.date_master_entry.get(), 'treble_file': self.date_treble_entry.get(), 'detective_sample': self.detective_sample_entry.get(), 'detective_treble': self.detective_treble_entry.get(), 'detective_folder': self.detective_folder_entry.get(), 'create_folder': self.create_folder_entry.get(), 'create_output': self.create_output_entry.get()}
         with open(self.settings_file, 'w') as f: json.dump(settings, f, indent=4)
-
     def load_settings(self):
         try:
             if os.path.exists(self.settings_file):
@@ -68,14 +148,12 @@ class App(tk.Tk):
                     self.create_folder_entry.insert(0, settings.get('create_folder', ''))
                     self.create_output_entry.insert(0, settings.get('create_output', ''))
         except (json.JSONDecodeError, KeyError): print(f"Warning: Could not read '{self.settings_file}'.")
-
     def check_plot_queue(self):
         try:
             plot_args = self.plot_queue.get_nowait()
             if plot_args: plot_results(**plot_args)
         except queue.Empty: pass
         finally: self.after(100, self.check_plot_queue)
-
     def _run_in_thread(self, target_func, args, button_to_disable, is_analysis=False):
         def thread_target():
             if button_to_disable: self.after(0, lambda: button_to_disable.config(state=tk.DISABLED))
@@ -95,27 +173,24 @@ class App(tk.Tk):
             finally:
                 if button_to_disable: self.after(0, lambda: button_to_disable.config(state=tk.NORMAL))
         thread = threading.Thread(target=thread_target); thread.daemon = True; thread.start()
-
     def _create_tabs(self):
         self._create_date_tab()
         self._create_detective_tab()
         self._create_master_tab()
         self._create_index_build_tab()
         self._create_methodology_tab()
-
-    def _create_report_widget(self):
-        report_frame = ttk.LabelFrame(self, text="Report Generation")
-        report_frame.pack(pady=5, padx=10, fill="x")
+    def _create_report_widget(self, parent): # MODIFIED: Accepts a parent
+        report_frame = ttk.LabelFrame(parent, text="Report Generation") # MODIFIED: Uses parent
+        report_frame.pack(pady=5, padx=0, fill="x")
         self.generate_report_button = ttk.Button(report_frame, text="Generate Text Report...", command=self._generate_report, state=tk.DISABLED)
         self.generate_report_button.pack(pady=5)
 
-    def _create_log_widget(self):
-        log_frame = ttk.LabelFrame(self, text="Output Log")
-        log_frame.pack(pady=5, padx=10, expand=True, fill="both")
+    def _create_log_widget(self, parent): # MODIFIED: Accepts a parent
+        log_frame = ttk.LabelFrame(parent, text="Output Log") # MODIFIED: Uses parent
+        log_frame.pack(pady=5, padx=0, expand=True, fill="both")
         self.log_widget = tk.Text(log_frame, height=10, wrap=tk.WORD, state=tk.DISABLED)
         self.log_widget.pack(expand=True, fill="both", padx=5, pady=5)
         sys.stdout = TextRedirector(self.log_widget)
-        
     def _create_date_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="1. Date")
         self.date_reverse_sample_var = tk.BooleanVar()
@@ -154,7 +229,6 @@ class App(tk.Tk):
         self.date_stiffness_combo.grid(row=4, column=1, padx=5, pady=5, sticky="w")
         run_button = ttk.Button(tab, text="Run Date Analysis", command=self._run_date); run_button.pack(pady=10)
         toggle()
-
     def _create_detective_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="2. Detective")
         self.detective_reverse_sample_var = tk.BooleanVar()
@@ -205,7 +279,6 @@ class App(tk.Tk):
         self.detective_stiffness_combo.grid(row=3, column=1, padx=5, pady=5, sticky="w")
         run_button = ttk.Button(tab, text="Run Detective Analysis", command=self._run_detective); run_button.pack(pady=10)
         toggle()
-
     def _create_master_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="3. Create Master")
         frame = ttk.LabelFrame(tab, text="Create a Custom Master Chronology"); frame.pack(padx=20, pady=20, fill="x")
@@ -216,7 +289,6 @@ class App(tk.Tk):
         self.create_output_entry = ttk.Entry(frame, width=60); self.create_output_entry.grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(frame, text="Save As...", command=self._save_file_as).grid(row=1, column=2, padx=5, pady=5)
         run_button = ttk.Button(tab, text="Create Master File", command=self._run_create); run_button.pack(pady=20)
-        
     def _create_index_build_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="4. Setup")
         index_frame = ttk.LabelFrame(tab, text="Step 1: Download & Index NOAA Files (Run once)")
@@ -234,20 +306,12 @@ class App(tk.Tk):
         self.build_min_end_year_spinbox = ttk.Spinbox(build_options_grid, from_=0, to=2100, increment=50, width=5); self.build_min_end_year_spinbox.set(1500)
         self.build_min_end_year_spinbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.build_button = ttk.Button(build_frame, text="Build Selected", command=self._run_build); self.build_button.pack(pady=10)
-
     def _create_methodology_tab(self):
-        tab = ttk.Frame(self.notebook)
-        # RENAMED TAB TO REFLECT EXPANDED CONTENT
-        self.notebook.add(tab, text="5. Methods & References")
-        text_frame = ttk.Frame(tab)
-        text_frame.pack(padx=10, pady=10, expand=True, fill="both")
+        tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="5. Methods & References")
+        text_frame = ttk.Frame(tab); text_frame.pack(padx=10, pady=10, expand=True, fill="both")
         methodology_text = tk.Text(text_frame, wrap=tk.WORD, padx=5, pady=5, font=("Helvetica", 10), background="#f0f0f0")
-        scrollbar = ttk.Scrollbar(text_frame, command=methodology_text.yview)
-        methodology_text.config(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        methodology_text.pack(side=tk.LEFT, expand=True, fill="both")
-
-        # --- FULLY UPDATED CONTENT ---
+        scrollbar = ttk.Scrollbar(text_frame, command=methodology_text.yview); methodology_text.config(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y); methodology_text.pack(side=tk.LEFT, expand=True, fill="both")
         content = textwrap.dedent("""
             This document explains the scientific choices and methods used by this software to ensure accurate and reliable dendrochronological analysis, grounded in established scientific literature.
 
@@ -300,15 +364,12 @@ class App(tk.Tk):
         methodology_text.config(state=tk.NORMAL)
         methodology_text.insert(tk.END, content)
         methodology_text.config(state=tk.DISABLED)
-
     def _get_rwl_length(self, file_path):
         if not file_path or not os.path.exists(file_path): return 0
         try: return len(parse_as_floating_series(file_path))
         except Exception: return 0
-
     def _update_default_overlap(self):
-        new_overlap = 0
-        active_tab_index = self.notebook.index(self.notebook.select())
+        new_overlap = 0; active_tab_index = self.notebook.index(self.notebook.select())
         is_date_tab = active_tab_index == 0
         mode_var = self.date_type_var if is_date_tab else self.detective_type_var
         sample_entry = self.date_sample_entry if is_date_tab else self.detective_sample_entry
@@ -330,77 +391,31 @@ class App(tk.Tk):
         if new_overlap >= 30:
             self.date_min_overlap_spinbox.set(new_overlap)
             self.detective_min_overlap_spinbox.set(new_overlap)
-
     def _browse_file(self, entry_widget, is_master=False, callback=None):
         types = (("RWL files", "*.rwl"), ("All files", "*.*")) if not is_master else (("All files", "*.*"),("CSV files", "*.csv"),("RWL files", "*.rwl"))
         filename = filedialog.askopenfilename(title="Select a file", filetypes=types)
         if filename:
             entry_widget.delete(0, tk.END); entry_widget.insert(0, filename)
             if callback: callback()
-
     def _browse_for_sample_file(self):
         filename = filedialog.askopenfilename(title="Select a Sample File", filetypes=(("RWL files", "*.rwl"), ("All files", "*.*")))
         if filename:
             self.date_sample_entry.delete(0, tk.END); self.date_sample_entry.insert(0, filename)
             self.detective_sample_entry.delete(0, tk.END); self.detective_sample_entry.insert(0, filename)
             self._update_default_overlap()
-
     def _browse_folder(self, entry_widget):
         foldername = filedialog.askdirectory(title="Select a folder")
         if foldername: entry_widget.delete(0, tk.END); entry_widget.insert(0, foldername)
-
     def _save_file_as(self):
         filename = filedialog.asksaveasfilename(title="Save Master As", defaultextension=".csv", filetypes=(("CSV files", "*.csv"),))
         if filename: self.create_output_entry.delete(0, tk.END); self.create_output_entry.insert(0, filename)
-
-    def _run_date(self):
-        run_button = self.notebook.nametowidget(self.notebook.select()).winfo_children()[-1]
-        analysis_type = self.date_type_var.get()
-        min_overlap = int(self.date_min_overlap_spinbox.get())
-        master = self.date_master_entry.get()
-        stiffness_pct = self._get_stiffness_from_string(self.date_stiffness_combo.get())
-        if not master: messagebox.showerror("Error", "Please select a reference file."); return
-        if analysis_type == "single":
-            sample = self.date_sample_entry.get()
-            if not sample: messagebox.showerror("Error", "Please select a sample file."); return
-            reverse_sample = self.date_reverse_sample_var.get()
-            self._run_in_thread(run_date_analysis, (sample, master, min_overlap, False, reverse_sample, stiffness_pct), run_button, is_analysis=True)
-        else:
-            bass = self.date_sample_entry.get(); treble = self.date_treble_entry.get()
-            if not bass or not treble: messagebox.showerror("Error", "Please select both bass and treble files."); return
-            reverse_bass = self.date_reverse_sample_var.get(); reverse_treble = self.date_reverse_treble_var.get()
-            final_args = ["placeholder", master, min_overlap, False, False, stiffness_pct]
-            self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_date_analysis, final_args, reverse_bass, reverse_treble), run_button, is_analysis=True)
-
-    def _run_detective(self):
-        run_button = self.notebook.nametowidget(self.notebook.select()).winfo_children()[-1]
-        analysis_type = self.detective_type_var.get()
-        if self.detective_target_var.get() == "category": target = self.detective_category_combo.get()
-        else: target = self.detective_folder_entry.get()
-        if not target: messagebox.showerror("Error", "Please select a target category or folder."); return
-        top_n = int(self.detective_top_n_spinbox.get()); min_overlap = int(self.detective_min_overlap_spinbox.get()); min_end_year = int(self.detective_min_end_year_spinbox.get())
-        stiffness_pct = self._get_stiffness_from_string(self.detective_stiffness_combo.get())
-        if analysis_type == "single":
-            sample = self.detective_sample_entry.get()
-            if not sample: messagebox.showerror("Error", "Please select a sample file."); return
-            reverse_sample = self.detective_reverse_sample_var.get()
-            self._run_in_thread(run_detective_analysis, (sample, target, top_n, min_overlap, min_end_year, reverse_sample, stiffness_pct), run_button, is_analysis=True)
-        else:
-            bass = self.detective_sample_entry.get(); treble = self.detective_treble_entry.get()
-            if not bass or not treble: messagebox.showerror("Error", "Please select both bass and treble files."); return
-            reverse_bass = self.detective_reverse_sample_var.get(); reverse_treble = self.detective_reverse_treble_var.get()
-            final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False, stiffness_pct]
-            self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_detective_analysis, final_args, reverse_bass, reverse_treble), run_button, is_analysis=True)
-
     def _run_create(self):
         folder = self.create_folder_entry.get(); output = self.create_output_entry.get()
         if not folder or not output: messagebox.showerror("Error", "Please select an input folder and an output file."); return
         button = self.notebook.nametowidget(self.notebook.select()).winfo_children()[-1]
         self._run_in_thread(run_create_master, (folder, output), button)
-        
     def _run_download(self):
         self._run_in_thread(download_and_index_files, (), self.index_button)
-        
     def _run_build(self):
         target = self.build_target_combo.get()
         min_end_year = int(self.build_min_end_year_spinbox.get())
@@ -408,7 +423,6 @@ class App(tk.Tk):
             self._run_in_thread(build_master_from_index, ("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750, min_end_year), self.build_button)
         if target in ['baltic', 'all']: 
             self._run_in_thread(build_master_from_index, ("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750, min_end_year), self.build_button)
-
     def _generate_report(self):
         if not self.last_analysis_results: messagebox.showerror("Error", "No analysis data found."); return
         res = self.last_analysis_results
