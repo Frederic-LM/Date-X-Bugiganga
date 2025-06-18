@@ -1,4 +1,4 @@
-# gogo_gui.py (Version 9.6 - Streamlined Reporting Workflow)
+# gogo_gui.py (Version 9.7 - Integrated Plot Reporting)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -36,9 +36,9 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("GoGo Dendro-Dating Tool v9.6") # Version bump
+        self.title("Date-X Bugiganga: A Dendro-Dating Tool v9.7") # Version bump
         self.geometry("1450x550")
-        self.settings_file = "gogo_settings.json"
+        self.settings_file = "date-x_settings.json"
         self.last_analysis_results = None
         self.plot_queue = queue.Queue()
         self._create_main_layout()
@@ -135,7 +135,7 @@ class App(tk.Tk):
     def check_plot_queue(self):
         try:
             plot_args = self.plot_queue.get_nowait()
-            if plot_args: plot_results(**plot_args)
+            if plot_args: plot_results(plot_args) # Pass the whole dict
         except queue.Empty: pass
         finally: self.after(100, self.check_plot_queue)
     def _run_in_thread(self, target_func, args, button_to_disable, is_analysis=False):
@@ -147,11 +147,10 @@ class App(tk.Tk):
                 if is_analysis and result:
                     self.last_analysis_results = result
                     if 'raw_sample' in result:
-                        plot_args = {k: v for k, v in result.items() if k in plot_results.__code__.co_varnames}
-                        self.plot_queue.put(plot_args)
+                        # Pass the ENTIRE results dictionary to the plot queue
+                        self.plot_queue.put(result)
                     self.after(0, lambda: self.save_report_button.config(state=tk.NORMAL))
                     
-                    # --- NEW: Auto-print report to log ---
                     report_content = self._create_report_content()
                     if report_content:
                         self.after(0, lambda: print("\n\n" + "="*70 + "\n           AUTOMATICALLY GENERATED REPORT\n" + "="*70 + "\n" + report_content))
@@ -504,7 +503,7 @@ class App(tk.Tk):
 
         res = self.last_analysis_results
         
-        # --- Determine default save path and filename ---
+        # Determine default save path and filename
         if res.get('analysis_mode') == 'two_piece':
             sample_path = res.get('bass_file')
         else:
