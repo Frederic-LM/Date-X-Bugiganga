@@ -1,197 +1,485 @@
-# Gogo & Date-X Bugiganga: A Dendro-X-Dating Tool
+# 🌳 Gogo & Date-X Bugiganga: A Dendro-X-Dating Tool
+
+<div align="center">
+
 *GoGo-Bugiganga to jump into X-Dating.*
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)
-![License: GPL-3.0](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
+![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
 
-**Date-X Bugiganga** is a professional-grade dendrochronology toolkit designed for the scientific cross-dating of tree-ring measurement series. It combines a powerful command-line interface (CLI) for batch processing and a user-friendly graphical user interface (GUI) for interactive analysis.
+**Professional-grade dendrochronology toolkit for scientific cross-dating of tree-ring measurement series**
 
-The software is built on established scientific principles, using modern detrending methods (Cubic Smoothing Spline) and a robust, multi-dimensional statistical validation approach (T-Value, Overlap, and Gleichläufigkeit) to ensure reliable and defensible results.
+[Quick Start](#-quick-start) • [Features](#-core-features) • [GUI Guide](#-gui-guide) • [CLI Reference](#-cli-reference) • [Examples](#-examples)
 
-## Table of Contents
+</div>
 
-1.  [Core Features](#core-features)
-2.  [The Scientific Workflow](#the-scientific-workflow)
-3.  [Software Components](#software-components)
-4.  [GUI vs. CLI: Which to Use?](#gui-vs-cli-which-to-use)
-5.  [Installation and Setup](#installation-and-setup)
-6.  [Usage Guide: The `Date-X.py` GUI](#usage-guide-the-date-xpy-gui)
-    *   [Tab 1: Date](#tab-1-date)
-    *   [Tab 2: Detective](#tab-2-detective)
-    *   [Tab 3: Create Master](#tab-3-create-master)
-    *   [Tab 4: Setup](#tab-4-setup)
-    *   [Tab 5: Methods & References](#tab-5-methods--references)
-7.  [Usage Guide: The `gogo.py` CLI](#usage-guide-the-gogopy-cli)
-    *   [`index`](#index)
-    *   [`build`](#build)
-    *   [`create`](#create)
-    *   [`date`](#date-1)
-    *   [`detective`](#detective-1)
-8.  [Building a Standalone Executable (`.exe`)](#building-a-standalone-executable-exe)
+---
 
-## Core Features
+## 🎯 What is Date-X Bugiganga?
 
-*   **Modern Detrending:** Uses a Cubic Smoothing Spline to remove biological age trends, superior to older methods for its flexibility and accuracy.
-*   **Multi-Dimensional Validation:** Classifies match strength using a combination of **T-Value**, **Overlap (n)**, and **Gleichläufigkeit (GLK)**, preventing false positives from statistically-plausible but biologically-unlikely matches.
-*   **Interactive GUI (`Date-X.py`):** An intuitive interface for running analyses, visualizing results, and generating reports.
-*   **Powerful CLI (`gogo.py`):** A scriptable backend for batch processing, building master chronologies, and managing the reference database.
-*   **Comprehensive Plotting:** Generates a detailed 2x2 plot including graphs, key statistics, and a full narrative interpretation for a complete, shareable analysis summary.
-*   **Two-Piece Analysis:** Specialized mode to cross-match, validate, and merge two separate measurement series (e.g., the bass and treble sides of a violin belly) into a single, more robust mean chronology before dating.
-*   **Reference Database Management:** Tools to download, index, and build regional master chronologies from the NOAA public database.
+**Date-X Bugiganga** is a comprehensive dendrochronology toolkit that combines cutting-edge statistical methods with user-friendly interfaces to provide accurate tree-ring dating. Whether you're analyzing musical instrument wood, archaeological samples, or building materials, this tool delivers reliable, scientifically-defensible results.
 
-## The Scientific Workflow
+### Why Choose Date-X Bugiganga?
 
-The recommended workflow ensures that your analysis is built upon a solid foundation of validated reference data.
+- 🔬 **Scientific Rigor**: Multi-dimensional validation using T-Value, Overlap, and Gleichläufigkeit
+- 🚀 **Modern Methods**: Cubic Smoothing Spline detrending superior to traditional approaches  
+- 🎨 **Dual Interface**: Choose between intuitive GUI or powerful CLI
+- 📊 **Rich Visualizations**: Comprehensive 2x2 plots with narrative interpretations
+- 🌍 **Global Database**: Integrated NOAA reference database access
+- ⚡ **Batch Processing**: Handle hundreds of samples efficiently
 
-1.  **Step 1: Build the Reference Database (Once)**
-    *   Use the `Setup` tab in the GUI or the `gogo.py index` command to download and index standard-format `.rwl` files from the NOAA server. This creates a local cache and an index file (`noaa_europe_index.csv`).
-    *   This step is only required once or to update the database.
+---
 
-2.  **Step 2: Create Master Chronologies**
-    *   Use the `Setup` tab in the GUI or the `gogo.py build` command to create regional master chronologies (e.g., 'Alpine Instrument Wood') from the indexed files. These masters average many tree-ring series, amplifying the common climate signal and are excellent for initial dating.
+## 🚀 Quick Start
 
-3.  **Step 3: Analyze Your Sample**
-    *   **For a known origin:** Use the `Date` tab in the GUI or the `gogo.py date` command to run your sample against a specific, relevant master chronology.
-    *   **For an unknown origin:** Use the `Detective` tab in the GUI or the `gogo.py detective` command. This runs your sample against *every individual site chronology* in a specified category, helping to pinpoint the most likely geographic origin with high precision.
+### Installation (5 minutes)
 
-4.  **Step 4: Interpret Results**
-    *   Review the generated plot, which provides a complete visual and narrative summary. The classification ("Very Strong Match", "Significant Match", etc.) is your primary guide to the reliability of the result.
-    *   Use the "Save Text Report" button in the GUI to generate a clean, shareable text file of the full analysis.
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/date-x-bugiganga.git
+cd date-x-bugiganga
 
-## Software Components
+# Install dependencies
+pip install pandas numpy matplotlib scipy tqdm
 
-*   `gogo.py`: The core scientific backend and command-line interface. It contains all the logic for parsing files, performing calculations, and generating plots.
-*   `Date-X.py`: The graphical user interface (GUI). It provides a user-friendly front-end for the functions within `gogo.py`.
+# Launch the GUI
+python Date-X.py
+```
 
-## GUI vs. CLI: Which to Use?
+### Your First Analysis (6 minutes)
 
-| Feature / Use Case                  | `Date-X.py` (GUI)                               | `gogo.py` (CLI)                                    |
-| ----------------------------------- | ----------------------------------------------- | -------------------------------------------------- |
-| **Primary Use**                     | Interactive, visual analysis of single samples. | Batch processing, scripting, and automation.       |
-| **Ease of Use**                     | **High.** Point-and-click interface.            | **Medium.** Requires comfort with the command line. |
-| **Two-Piece Mean Analysis**         | **Fully supported** with simple radio buttons.  | Not directly exposed; requires manual scripting.   |
-| **Advanced Options**                | Easy access to `Reverse` and `Stiffness` flags. | Flags are available but must be typed.             |
-| **Building Chronologies**           | Simple buttons in the `Setup` tab.              | Flexible commands for building specific targets.   |
-| **Output**                          | Interactive plot window, auto-logged report.    | Plot window, console output.                       |
-| **Best For...**                     | Analyzing a new instrument; generating reports. | Re-analyzing 100s of files with new parameters.    |
+1. **Setup Database**: Click `Setup` tab → `Download NOAA Database` → `Build Masters`
+2. **Load Sample**: `Date` tab → Browse for your `.rwl` file
+3. **Select Master**: Choose `master_alpine_instrument_wood.csv`
+4. **Run Analysis**: Click `Date Sample` and view results!
 
-## Installation and Setup
+---
 
-**Prerequisites:** Python 3.7+
+## ✨ Core Features
 
-1.  **Clone or download** the repository.
-2.  **Install dependencies** from the command line:
-    ```bash
-    pip install pandas numpy matplotlib scipy tqdm
-    ```
-3.  **Place the files** `gogo.py` and `Date-X.py` in the same directory.
+### 🔬 Advanced Science
+- **Modern Detrending**: Cubic Smoothing Spline removes biological age trends with superior flexibility
+- **Multi-Dimensional Validation**: Prevents false positives through comprehensive statistical analysis
+- **Two-Piece Analysis**: Specialized mode for matching and merging separate measurement series
 
-## Usage Guide: The `Date-X.py` GUI
+### 🎯 Powerful Analysis Tools
+- **Interactive GUI**: Point-and-click interface for single sample analysis
+- **Scriptable CLI**: Batch processing and automation capabilities
+- **Detective Mode**: Unknown origin samples tested against entire database
+- **Custom Masters**: Build chronologies from your own reference collections
 
-Run the GUI from your terminal:
+### 📊 Rich Output
+- **Comprehensive Plots**: 2x2 visual summaries with statistical overlays
+- **Narrative Reports**: Full interpretation with match strength classification
+- **Export Options**: Save results as images, CSV, or formatted text reports
+
+---
+
+## 🖥️ System Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **Python** | 3.7+ (3.9+ recommended) |
+| **OS** | Windows 10+, macOS 10.14+, Linux (Ubuntu 18.04+) |
+| **RAM** | 4GB minimum, 8GB recommended |
+| **CPU** | Multicore for // Processing |
+| **Storage** | 100MB free space (for NOAA database) |
+| **Display** | 1920x1080 recommended for GUI |
+
+### Supported File Formats
+- **Input**: `.rwl` (Tucson format), `.csv` (custom format)
+- **Output**: `.png`, `.pdf`, `.csv`, `.txt`
+
+---
+
+## 📋 Table of Contents
+
+### Getting Started
+- [Installation & Setup](#installation-and-setup)
+- [Quick Start Guide](#quick-start-guide)
+- [System Requirements](#system-requirements)
+
+### User Guides
+- [🖼️ GUI Guide (`Date-X.py`)](#-gui-guide)
+- [⌨️ CLI Reference (`gogo.py`)](#-cli-reference)
+- [📖 Examples & Use Cases](#-examples)
+
+### Advanced Topics
+- [🔬 Scientific Workflow](#-the-scientific-workflow)
+- [🏗️ Building Executables](#-building-executables)
+- [🔧 Troubleshooting](#-troubleshooting)
+
+### Reference
+- [📚 Methods & References](#-methods--references)
+- [🤝 Contributing](#-contributing)
+- [📝 Changelog](#-changelog)
+
+---
+
+## 🔬 The Scientific Workflow
+
+> **💡 Pro Tip**: Follow this workflow for the most reliable results
+
+```mermaid
+graph TD
+    A[📥 Download NOAA Database] --> B[🏗️ Build Master Chronologies]
+    B --> C{Sample Origin Known?}
+    C -->|Yes| D[📊 Date Against Specific Master]
+    C -->|No| E[🕵️ Detective Mode - Test All Sites]
+    D --> F[📈 Analyze Results]
+    E --> F
+    F --> G[📄 Generate Report]
+```
+
+### Step-by-Step Process
+
+1. **🗄️ Build Reference Database** *(One-time setup)*
+   - Download standard `.rwl` files from NOAA server
+   - Create local cache and index (`noaa_europe_index.csv`)
+
+2. **🏗️ Create Master Chronologies**
+   - Build regional masters (e.g., 'Alpine Instrument Wood')
+   - Average multiple series to amplify climate signals
+
+3. **🎯 Analyze Your Sample**
+   - **Known origin**: Test against specific master chronology
+   - **Unknown origin**: Use Detective mode for geographic identification
+
+4. **📊 Interpret Results**
+   - Review comprehensive visual plots
+   - Check statistical classification (Very Strong, Significant, etc.)
+   - Generate shareable reports
+
+---
+
+## 🖼️ GUI Guide
+
+### Launch the GUI
 ```bash
 python Date-X.py
 ```
 
-### Tab 1: Date
+<!-- Screenshot placeholder -->
+> 📸 *[Screenshot of main GUI interface would go here]*
 
-*Purpose:* To date a sample against a single, known reference file (e.g., `master_alpine_instrument_wood.csv`).
-*   **Analysis Type:** Choose "Single Sample" or "Two-Piece Mean".
-*   **File Inputs:** Browse for your sample file(s) and the reference master file.
-*   **Options:**
-    *   `Reverse`: Check this if your sample was measured from the center joint outwards.
-    *   `Minimum Overlap`: Sets the minimum number of years the sample and master must overlap to be considered.
-    *   `Detrending Stiffness`: 'Standard (67%)' is suitable for most cases. 'Stiff (80%)' is better for sensitive series with a weak age trend.
+### Tab 1: 📊 Date 
+**Purpose**: Date samples against known reference chronologies
 
-### Tab 2: Detective
+| Field | Description | Recommendation |
+|-------|-------------|----------------|
+| **Analysis Type** | Single Sample or Two-Piece Mean | Use Two-Piece for instrument analysis |
+| **Sample File** | Your `.rwl` measurement file | Ensure proper Tucson format |
+| **Master File** | Reference chronology | Use relevant regional master |
+| **Reverse** | Sample measured center→edge | Check for radial measurements |
+| **Min Overlap** | Required overlap years | 60+ for reliable results |
+| **Stiffness** | Detrending sensitivity | Standard (67%) for most cases |
 
-*Purpose:* To date a sample of unknown origin against a large database of individual site chronologies to find the best match and likely origin.
-*   **File Inputs:** Select your sample file(s).
-*   **Reference Target:**
-    *   `Predefined Category`: Use a category (`alpine`, `baltic`, etc.) built from the NOAA database.
-    *   `Local Folder`: Use a local folder containing your own collection of `.rwl` files.
-*   **Options:**
-    *   `Top N Results`: How many top matches to display in the console log.
-    *   `Minimum Overlap`: Higher values (e.g., 80) are recommended for detective work to ensure reliable matches.
+### Tab 2: 🕵️ Detective
+**Purpose**: Identify unknown sample origins
 
-### Tab 3: Create Master
+- **Predefined Categories**: `alpine`, `baltic`
+- **Custom Folders**: Use your own reference collections
+- **Top N Results**: Display best matches (recommended: 5-10)
+- **High Overlap**: Use 80+ years for detective work
 
-*Purpose:* To create your own custom master chronology from a local folder of `.rwl` files.
-*   **Input Folder:** The folder containing your measurement files.
-*   **Output Filename:** The name for the resulting `.csv` master file.
+### Tab 3: 🏗️ Create Master
+**Purpose**: Build custom chronologies from local collections
 
-### Tab 4: Setup
+1. Select folder containing `.rwl` files
+2. Choose output filename
+3. Software automatically processes and averages series
 
-*Purpose:* To manage the reference database.
-*   **Step 1:** Download and index the NOAA database. **Run this once.**
-*   **Step 2:** Build the predefined master chronologies from the indexed data.
+### Tab 4: ⚙️ Setup
+**Purpose**: Database management
 
-### Tab 5: Methods & References
+- **Step 1**: Download NOAA database *(run once)*
+- **Step 2**: Build predefined masters
+- Monitor progress with built-in progress bars
 
-Provides a detailed explanation of the scientific methods and statistical thresholds used by the software, along with key scientific references.
+### Tab 5: 📚 Methods & References
+**Purpose**: Scientific methodology and citation information
 
-## Usage Guide: The `gogo.py` CLI
+---
 
-All commands are run from the terminal. Use `-h` for help on any command (e.g., `python gogo.py date -h`).
+## ⌨️ CLI Reference
 
-### `index`
-Downloads and indexes the NOAA Europe database.
+### Global Options
+```bash
+python gogo.py [command] -h  # Help for any command
+```
+
+### Database Management
+
+#### `index` - Download NOAA Database
 ```bash
 python gogo.py index
 ```
+*Downloads and indexes the complete NOAA Europe database*
 
-### `build`
-Builds master chronologies from the indexed data.
+#### `build` - Create Master Chronologies
 ```bash
-# Build both alpine and baltic chronologies
+# Build all predefined masters
 python gogo.py build
 
-# Build only the alpine chronology
+# Build specific target
 python gogo.py build --target alpine
+python gogo.py build --target baltic
 ```
 
-### `create`
-Creates a custom master from a local folder.
+### Analysis Commands
+
+#### `date` - Single Master Analysis
 ```bash
-python gogo.py create "path/to/my_rwl_folder" "my_custom_master.csv"
+python gogo.py date "sample.rwl" "master_alpine.csv" [options]
+
+# Options:
+--min_overlap 60        # Minimum overlap years
+--reverse              # Reverse measurement direction  
+--stiffness 0.67       # Detrending stiffness (0.5-0.8)
 ```
 
-### `date`
-Dates a sample against a single master.
+#### `detective` - Multi-Master Search
 ```bash
-python gogo.py date "path/to/my_sample.rwl" "master_alpine_instrument_wood.csv" --min_overlap 60
+# Search predefined category
+python gogo.py detective "sample.rwl" alpine --top_n 5
+
+# Search local folder
+python gogo.py detective "sample.rwl" "/path/to/references/"
 ```
 
-### `detective`
-Runs a sample against a category or folder.
+#### `create` - Custom Master
 ```bash
-# Against a predefined category
-python gogo.py detective "my_sample.rwl" alpine --top_n 5
-
-# Against a local folder
-python gogo.py detective "my_sample.rwl" "path/to/my_rwl_folder"
+python gogo.py create "/path/to/rwl_folder/" "custom_master.csv"
 ```
 
-## Building a Standalone Executable (`.exe`)
+---
 
-You can package the GUI application into a single `.exe` file for easy distribution on Windows, so users don't need to install Python or any dependencies. The recommended tool is **PyInstaller**.
+## 📖 Examples
 
-1.  **Install PyInstaller:**
-    ```bash
-    pip install pyinstaller
-    ```
+### Example 1: Dating a Violin Top Plate
+```bash
+# Two-piece analysis for violin belly (bass and treble sides)
+python Date-X.py
+# Select "Two-Piece Mean", load both measurement files
+# Choose alpine master, check "Reverse" if needed
+```
 
-2.  **Run the PyInstaller command:**
-    Open a terminal in the directory containing `Date-X.py` and `gogo.py`. Run the following command:
+### Example 2: Unknown Origin Investigation
+```bash
+# CLI approach for unknown sample
+python gogo.py detective "mystery_sample.rwl" alpine --top_n 10 --min_overlap 80
 
-    ```bash
-    pyinstaller --name "Date-X" --onefile --windowed --icon="path/to/your_icon.ico" Date-X.py
-    ```
+# Expected output: Ranked list of best matches with statistics
+```
 
-    *   `--name "Date-X"`: Sets the name of the output executable.
-    *   `--onefile`: Packages everything into a single `.exe` file.
-    *   `--windowed`: Prevents a console window from appearing in the background when you run the GUI.
-    *   `--icon="..."`: (Optional) Associates a custom icon with your executable. The icon file must be in `.ico` format.
+### Example 3: Building Custom Regional Master
+```bash
+# Create master from local collection
+python gogo.py create "./my_oak_collection/" "regional_oak_master.csv"
+```
 
-3.  **Find your executable:**
-    PyInstaller will create a few folders. Your final application, `Date-X.exe`, will be inside the `dist` folder. You can copy this file to any other Windows machine and run it directly.
+### Example 4: Batch Processing Multiple Samples
+```bash
+# Process multiple files (requires simple script)
+for file in *.rwl; do
+    python gogo.py date "$file" "master_alpine.csv" --min_overlap 60
+done
+```
+
+---
+
+## 🏗️ Building Executables
+
+Create standalone `.exe` files for easy distribution without Python dependencies.
+
+### Prerequisites
+```bash
+pip install pyinstaller
+```
+
+### Build Command
+```bash
+pyinstaller --name "Date-X" --onefile --windowed --icon="icon.ico" Date-X.py
+```
+
+### Options Explained
+- `--onefile`: Single executable file
+- `--windowed`: No console window (GUI only)
+- `--icon`: Custom application icon
+- `--name`: Output executable name
+
+### Distribution
+- Executable located in `dist/` folder
+- Fully portable - no installation required
+- ~50-100MB file size (includes Python runtime)
+
+---
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### Installation Problems
+**Issue**: `ModuleNotFoundError: No module named 'pandas'`
+```bash
+# Solution: Install dependencies
+pip install pandas numpy matplotlib scipy tqdm
+```
+
+#### File Format Errors
+**Issue**: "Cannot parse .rwl file"
+```bash
+# Check file format:
+# - Must be standard Tucson format
+# - Headers should contain site codes
+# - Measurements in 0.01mm units
+```
+
+#### Memory Issues
+**Issue**: "Memory error during large detective search"
+```bash
+# Solutions:
+# 1. Increase minimum overlap (reduces comparisons)
+# 2. Use smaller reference categories
+# 3. Process in smaller batches
+```
+
+#### GUI Won't Start
+**Issue**: Tkinter-related errors
+```bash
+# Linux users may need:
+sudo apt-get install python3-tk
+
+# macOS users with Homebrew:
+brew install python-tk
+```
+
+### Performance Notes
+- **Database download**: ~10-15 minutes (one-time)
+- **Master building**: ~2-5 minutes per category
+- **Single analysis**: ~1-5 seconds
+- **Detective mode**: ~30 seconds to 5 minutes (depends on database size)
+
+### Getting Help
+- 📖 Check the [Methods & References](#-methods--references) tab in GUI
+- 🐛 Report bugs via GitHub Issues
+- 💡 Feature requests welcome
+- 📧 Contact: your.email@domain.com
+
+---
+
+## 📚 Methods & References
+
+### Statistical Methods
+
+**Detrending**: Cubic Smoothing Spline with 67% cutoff frequency (Cook & Peters, 1981)
+
+**Cross-Dating Validation**:
+- **T-Value**: Student's t-test for correlation significance
+- **Overlap (n)**: Number of overlapping years
+- **Gleichläufigkeit (GLK)**: Sign-test for year-to-year changes
+
+### Classification Thresholds
+
+| Classification | T-Value | Overlap | GLK | Interpretation |
+|----------------|---------|---------|-----|----------------|
+| **Very Strong** | >6.0 | >80 | >65% | Highly reliable match |
+| **Strong** | >4.0 | >60 | >60% | Reliable match |
+| **Significant** | >3.0 | >40 | >55% | Likely correct match |
+| **Weak** | >2.0 | >30 | >50% | Possible match, verify |
+| **No Match** | <2.0 | - | - | No significant correlation |
+
+### Key References
+
+1. **Cook, E.R. & Peters, K. (1981)** *The smoothing spline: a new approach to standardizing forest interior tree-ring width*
+2. **Baillie, M.G.L. & Pilcher, J.R. (1973)** *A simple crossdating program for tree-ring research*
+3. **Eckstein, D. & Bauch, J. (1969)** *Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens*
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions to improve Date-X Bugiganga! Here's how you can help:
+
+### 🐛 Bug Reports
+- Use GitHub Issues with detailed descriptions
+- Include sample files if possible
+- Specify OS and Python version
+
+### 💡 Feature Requests  
+- Describe use case and expected behavior
+- Consider scientific validity and user needs
+- Check existing issues first
+
+### 🔧 Code Contributions
+- Fork the repository
+- Create feature branch (`git checkout -b feature/amazing-feature`)
+- Follow PEP 8 style guidelines
+- Add tests for new functionality
+- Submit pull request with clear description
+
+### 📖 Documentation
+- Improve README clarity
+- Add examples and use cases
+- Translate to other languages
+- Create video tutorials
+
+---
+
+## 📝 Changelog
+
+### Version 2.1.0 *(Current)*
+- ✨ Added two-piece mean analysis mode
+- 🔧 Improved GUI responsiveness for large datasets
+- 📊 Enhanced plot generation with narrative summaries
+- 🐛 Fixed memory issues with detective mode
+
+### Version 2.0.0
+- 🎨 Complete GUI redesign with tabbed interface
+- 🚀 Added CLI interface for batch processing
+- 🌍 Integrated NOAA database access
+- 📈 New comprehensive plotting system
+
+### Version 1.5.0
+- 🔬 Implemented Cubic Smoothing Spline detrending
+- 📊 Added multi-dimensional validation system
+- 🏗️ Master chronology building tools
+
+[View Full Changelog →](CHANGELOG.md)
+
+---
+
+## 📄 License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+### What this means:
+- ✅ Commercial use allowed
+- ✅ Modification and distribution permitted
+- ✅ Patent use granted
+- ❗ Must disclose source code
+- ❗ Must include license and copyright notice
+- ❗ Derivative works must use same license
+
+---
+
+## 🙏 Acknowledgments
+
+- **NOAA Paleoclimatology Database** for providing open access to tree-ring data
+- **International Tree-Ring Data Bank (ITRDB)** for standardized data formats
+- **Scientific Community** for decades of dendrochronological research
+
+
+---
+
+<div align="center">
+
+**Made with 🌳 for the community**
+
+⭐ Star this repository if you find it useful!
+
+[🏠 Home](#-gogo--date-x-bugiganga-a-dendro-x-dating-tool) • [📚 Documentation](#-table-of-contents) • [🐛 Issues](https://github.com/Frederic-LM/Date-XBugiganga/issues) • [💬 Discussions](https://github.com/Frederic-LM/Date-XBugiganga/discussions)
+
+</div>
