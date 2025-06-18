@@ -1,4 +1,4 @@
-# gogo.py (Version 8.4.1 - Corrected)
+# gogo.py (Version 8.4.3)
 # ==============================================================================
 import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import pandas as pd, numpy as np
@@ -223,7 +223,7 @@ def run_create_master(input_folder, output_filename):
         print(f"--- SUCCESS! Saved to: '{output_filename}' ---")
     else: raise ValueError("Resulting chronology was empty.")
 
-def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test=False, reverse_sample=False):
+def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test=False, reverse_sample=False, spline_stiffness_pct=67):
     if not is_internal_test: print(f"\n--- Running Analysis: {os.path.basename(sample_file)} vs {os.path.basename(master_file)} ---")
     sample_chrono = parse_as_floating_series(sample_file)
     if sample_chrono.empty: raise ValueError(f"Could not read data from sample file: {sample_file}")
@@ -237,7 +237,9 @@ def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test
     else: master_chrono = pd.read_csv(master_file, index_col='year').squeeze("columns")
     if master_chrono.empty: raise ValueError(f"Could not read data from reference file: {master_file}")
     if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap ({min_overlap}) > sample length ({len(sample_chrono)}).")
-    sample_detrended = detrend(sample_chrono); master_detrended = detrend(master_chrono)
+    # Pass the stiffness value to the detrend function
+    sample_detrended = detrend(sample_chrono, spline_stiffness_pct=spline_stiffness_pct)
+    master_detrended = detrend(master_chrono, spline_stiffness_pct=spline_stiffness_pct)
     analysis_results = cross_date(sample_detrended, master_detrended, min_overlap=min_overlap)
     if "error" in analysis_results: raise ValueError(analysis_results['error'])
     if not is_internal_test: print(f"\n--- Cross-Dating Complete ---\nMost Likely End Year: {int(analysis_results['best_match']['end_year'])}")
@@ -245,12 +247,12 @@ def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test
 
 # THIS IS THE FUNCTION THAT WAS MISSING
 def process_single_file(args):
-    filename, sample_detrended, sample_basename, base_path, min_overlap = args
+    filename, sample_detrended, sample_basename, base_path, min_overlap, spline_stiffness_pct = args
     if filename == sample_basename: return None
     master_path = os.path.join(base_path, filename)
     master_raw = _build_master_from_rwl_file(master_path)
     if master_raw.empty or len(master_raw) < min_overlap: return None
-    master_detrended = detrend(master_raw)
+    master_detrended = detrend(master_raw, spline_stiffness_pct=spline_stiffness_pct)
     analysis_results = cross_date(sample_detrended, master_detrended, min_overlap=min_overlap)
     if "error" in analysis_results: return None
     best_match = analysis_results['best_match']
@@ -258,7 +260,7 @@ def process_single_file(args):
     best_match['source_file'] = filename
     return best_match
 
-def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_year=1500, reverse_sample=False):
+def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_year=1500, reverse_sample=False, spline_stiffness_pct=67):
     print(f"\n--- Running Detective Analysis on {os.path.basename(sample_file)} ---")
     sample_chrono = parse_as_floating_series(sample_file)
     if sample_chrono.empty: raise ValueError("Could not process sample file.")
@@ -267,7 +269,7 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
         sample_chrono = sample_chrono.iloc[::-1].reset_index(drop=True)
         sample_chrono.index = pd.RangeIndex(start=1, stop=len(sample_chrono) + 1, name='ring_number')
     if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap ({min_overlap}) > sample length ({len(sample_chrono)}).")
-    sample_detrended = detrend(sample_chrono)
+    sample_detrended = detrend(sample_chrono, spline_stiffness_pct=spline_stiffness_pct)
     file_list, base_path_for_masters = [], ""
     if os.path.isdir(target):
         base_path_for_masters = target
@@ -283,7 +285,7 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
         df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start']) & (index_df['end_year'] >= min_end_year)]
         file_list = df_filtered['filename'].tolist()
     if not file_list: raise ValueError(f"No reference files found for target '{target}' (including min_end_year={min_end_year}).")
-    tasks = [(filename, sample_detrended, os.path.basename(sample_file), base_path_for_masters, min_overlap) for filename in file_list]
+    tasks = [(filename, sample_detrended, os.path.basename(sample_file), base_path_for_masters, min_overlap, spline_stiffness_pct) for filename in file_list]
     print(f"Testing against {len(file_list)} sites using {multiprocessing.cpu_count()} CPU cores...")
     with multiprocessing.Pool() as pool:
         all_best_results = [res for res in tqdm(pool.imap(process_single_file, tasks), total=len(tasks)) if res is not None]
@@ -296,7 +298,7 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
     top_match_file_name = top_results.iloc[0]['source_file']
     top_match_full_path = os.path.join(base_path_for_masters, top_match_file_name)
     print(f"\nGenerating plot for top match: {top_match_file_name}")
-    plot_data_dict = run_date_analysis(sample_file, top_match_full_path, min_overlap=min_overlap, reverse_sample=reverse_sample)
+    plot_data_dict = run_date_analysis(sample_file, top_match_full_path, min_overlap=min_overlap, reverse_sample=reverse_sample, spline_stiffness_pct=spline_stiffness_pct)
     if not plot_data_dict:
         print("Could not generate plot for the top match.")
         return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "min_end_year": min_end_year, "results_df": top_results}
