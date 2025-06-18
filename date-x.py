@@ -1,4 +1,4 @@
-# date-x.py a gogo gui (Version 8.6 - Final Methodology & UI)
+# gogo_gui.py (Version 8.7 - Final Comprehensive Methods)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -25,7 +25,7 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("GoGo Dendro-Dating Tool v8.6")
+        self.title("GoGo Dendro-Dating Tool v8.7")
         self.geometry("850x800")
         self.settings_file = "gogo_settings.json"
         
@@ -43,13 +43,9 @@ class App(tk.Tk):
         self.check_plot_queue()
         print("Welcome! Ready for analysis.")
 
-    # --- Helper to parse stiffness value from GUI string ---
     def _get_stiffness_from_string(self, value_str):
-        """Parses 'Standard (67%)' into the integer 67."""
-        try:
-            return int(value_str.split('(')[1].split('%')[0])
-        except (IndexError, ValueError):
-            return 67 # Fallback to default if parsing fails
+        try: return int(value_str.split('(')[1].split('%')[0])
+        except (IndexError, ValueError): return 67
 
     def on_closing(self):
         print("Saving settings..."); self.save_settings(); self.destroy()
@@ -239,10 +235,10 @@ class App(tk.Tk):
         self.build_min_end_year_spinbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.build_button = ttk.Button(build_frame, text="Build Selected", command=self._run_build); self.build_button.pack(pady=10)
 
-    # UPDATED: The methodology tab content is now much more detailed.
     def _create_methodology_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="5. Methodology")
+        # RENAMED TAB TO REFLECT EXPANDED CONTENT
+        self.notebook.add(tab, text="5. Methods & References")
         text_frame = ttk.Frame(tab)
         text_frame.pack(padx=10, pady=10, expand=True, fill="both")
         methodology_text = tk.Text(text_frame, wrap=tk.WORD, padx=5, pady=5, font=("Helvetica", 10), background="#f0f0f0")
@@ -251,65 +247,55 @@ class App(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         methodology_text.pack(side=tk.LEFT, expand=True, fill="both")
 
-        # --- CONTENT WITH EXPLICIT FORMULAS ---
+        # --- FULLY UPDATED CONTENT ---
         content = textwrap.dedent("""
-            This document explains the scientific choices and methods used by this software to ensure accurate and reliable dendrochronological analysis.
+            This document explains the scientific choices and methods used by this software to ensure accurate and reliable dendrochronological analysis, grounded in established scientific literature.
 
             --- MEASUREMENT DIRECTION (CRITICAL!) ---
-            For two-piece, book-matched instrument tops, the wood is processed in a way that places the YOUNGEST wood at the CENTER JOINT and the OLDEST wood at the OUTER EDGES.
-
-            Therefore, the correct measurement direction is:
+            For two-piece, book-matched instrument tops and backs, the wood is processed in a way that places the YOUNGEST wood at the CENTER JOINT and the OLDEST wood at the OUTER EDGES. The correct measurement direction is therefore:
             FROM THE OUTER EDGE (Ring 1) INWARDS TO THE CENTER JOINT (Final Ring).
+            If you have measured in the opposite direction, use the "Reverse" checkbox.
 
-            HOWEVER If rare cases you could come across samples that need to be process in the opposite direction, use the "Reverse" checkbox next to the sample file input.
+            --- COMPARISON OF DETRENDING METHODS ---
+            The goal of detrending is to remove the biological age trend to isolate the climate signal needed for dating. This software exclusively uses the Cubic Smoothing Spline, as it is superior to older methods for this specific task.
 
-            --- DETRENDING METHODOLOGY ---
-            Tree ring data contains two main signals: a long-term age trend and the short-term climate signal. To accurately cross-date, we must remove the age trend to isolate the climate signal. This process is called detrending. This software uses a cubic smoothing spline.
+            • Negative Exponential / Linear Regression: These methods fit a rigid, pre-defined curve. They fail if the tree's growth does not match this ideal shape (e.g., in cases of suppression and release common in Alpine forests).
 
-            • Standard (67%): This is the scientific default, best for general-purpose dating. It is flexible and excellent at removing strong age trends from a wide variety of "complacent" trees.
+            • Polynomial: While more flexible, these curves are notoriously unstable at the endpoints of the series, which is a critical flaw for reliable dating.
 
-            • Stiff (80%): This is a less flexible spline, better for "sensitive" trees (like high-altitude Alpine spruce) that have a weak age trend but a strong climate signal. The stiffer spline is less likely to accidentally remove the climate signal itself.
+            • Cubic Smoothing Spline (This Tool's Method): This is the modern standard. It is highly flexible, allowing it to accurately model complex, real-world growth patterns without making assumptions. It does not suffer from the endpoint instability of polynomials, making it the most robust choice.
+
+            --- DETRENDING STIFFNESS OPTIONS ---
+            • Standard (67%): The scientific default, best for general-purpose dating. It is flexible and excellent at removing strong age trends. (See Cook & Peters, 1981).
+
+            • Stiff (80%): A less flexible spline, better for "sensitive" trees (like high-altitude Alpine spruce) that have a weak age trend but a strong climate signal. The stiffer spline is less likely to accidentally remove the climate signal itself.
 
             --- STATISTICAL VALIDATION ---
-            • T-Value: The primary statistic for determining a match. It combines the correlation coefficient (r) with the length of the overlap (n). A high T-Value over a long overlap is a strong indicator of a correct match.
+            • Student's T-Value: The primary statistic for determining a match. It combines the correlation coefficient (r) with the length of the overlap (n). Its power comes from the "Student's" t-distribution, which is specifically designed for small sample sizes, making it more reliable than correlation alone. (See Baillie & Pilcher, 1973).
                 - T > 3.5 is a significant match.
                 - T > 5.0 is a very strong and reliable match.
 
-            • Correlation (r): A standard measure of how well two series move together, from -1 to +1.
-
-            • GLK (Gleichläufigkeit): Measures the percentage of years where the two series move in the same direction. High GLK (>65%) provides excellent secondary confirmation.
+            • GLK (Gleichläufigkeit): A classical German statistic measuring the percentage of years where two series move in the same direction. High GLK (>65%) provides excellent secondary confirmation. (See Eckstein & Bauch, 1969).
 
             --- EXPLICIT FORMULAS ---
             1. Spline Smoothing Factor (s):
-            The "stiffness" of the detrending spline is controlled by a smoothing factor `s`, calculated based on the chosen stiffness percentage (`p`) and the length of the series (`n`):
+            The stiffness of the detrending spline is controlled by `s`, calculated from the stiffness percentage (`p`) and series length (`n`):
                 s = n * (p / 100)^3
 
             2. Student's T-Value (t):
-            This converts the Pearson correlation coefficient `r` into a more robust significance score based on the overlap length `n`:
+            Converts the Pearson correlation `r` into a significance score based on the overlap length `n`:
                 t = r * sqrt( (n - 2) / (1 - r^2) )
 
             3. Gleichläufigkeit (GLK):
-            Calculated as the percentage of agreement in the sign of the first difference of the two series (`x` and `y`) over the overlapping interval of length `n`:
+            The percentage of agreement in the sign of the first difference of two series (`x` and `y`):
                 Agreement = sum( sign(x[i] - x[i-1]) == sign(y[i] - y[i-1]) )
                 GLK = (Agreement / (n - 1)) * 100
-                
-            ---  SCIENTIFIC REFERENCES ---
-            • Baillie, M.G.L. and Pilcher, J.R. (1973). "A simple cross-dating program for tree-ring research." Tree-Ring Bulletin 33, 7-14.
-              (Establishes the use of the Student's t-test for robust statistical cross-dating).
 
-            • Cook, E.R. and Peters, K. (1981). "The smoothing spline: a new approach to standardizing tree-ring width series for dendroclimatic studies." Tree-Ring Bulletin 41, 45-53.
-              (The foundational paper for using the cubic smoothing spline and the 67% stiffness standard).
-
-            • Eckstein, D. and Bauch, J. (1969). "Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens und zur Analyse seiner Aussagesicherheit." Forstwiss. Centralbl. 88, 230-250.
-              (A key paper introducing and validating the Gleichläufigkeit (GLK) statistic).
-
+            --- KEY SCIENTIFIC REFERENCES ---
+            • Baillie, M.G.L. & Pilcher, J.R. (1973). "A simple cross-dating program for tree-ring research." Tree-Ring Bulletin 33, 7-14.
+            • Cook, E.R. & Peters, K. (1981). "The smoothing spline: a new approach to standardizing tree-ring width series for dendroclimatic studies." Tree-Ring Bulletin 41, 45-53.
+            • Eckstein, D. & Bauch, J. (1969). "Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens..." Forstwiss. Centralbl. 88, 230-250.
             • Fritts, H.C. (1976). Tree Rings and Climate. Academic Press, New York.
-              (The foundational textbook for the entire field of dendrochronology).    
-
-            --- DATA HANDLING ---
-            • Floating Series: When you load a sample, the software intentionally ignores any baked-in dates. It treats the ring pattern as an undated, "floating" series to ensure the analysis is an unbiased scientific verification.
-
-            • Multi-Series Files: Some .rwl files contain multiple series (e.g., treble, bass, back). This tool's parser is designed for one series per file. Use the companion script `rework_rwl.py` to automatically split these complex files before analysis.
         """)
         methodology_text.config(state=tk.NORMAL)
         methodology_text.insert(tk.END, content)
