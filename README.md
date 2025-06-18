@@ -22,7 +22,7 @@
 **Date-X Bugiganga** is a comprehensive dendrochronology toolkit that combines cutting-edge statistical methods with user-friendly interfaces to provide tree-ring dating, it features:
 
 - 🔬 **Scientific Rigor**: Multi-dimensional validation using T-Value, Overlap, and Gleichläufigkeit
-- 🚀 **Modern Methods**: Cubic Smoothing Spline detrending superior to traditional approaches  
+- 🚀 **Modern Methods**: Cubic Smoothing Spline detrending 
 - 🎨 **Dual Interface**: Choose between intuitive GUI or powerful CLI
 - 📊 **Rich Visualizations**: Comprehensive 2x2 plots with narrative interpretations
 - 🌍 **Global Database**: Integrated NOAA reference database access
