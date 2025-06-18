@@ -1,8 +1,8 @@
-# gogo.py (Version 9.1 - Smart Reporting Backend)
+# gogo.py (Version 9.2 - Integrated Plot Reporting)
 # ==============================================================================
 import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import warnings
-from typing import Tuple
+from typing import Tuple, Dict
 import pandas as pd, numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -10,6 +10,80 @@ from scipy.stats import pearsonr
 from scipy.interpolate import UnivariateSpline
 
 warnings.filterwarnings("ignore", message="The maximal number of iterations")
+
+def _classify_dendro_match(t_value, overlap_years, gleich_percent):
+    """Classify match strength based on multi-dimensional thresholds. DUPLICATED LOGIC for backend independence."""
+    if t_value >= 7.0 and overlap_years >= 80 and gleich_percent >= 70:
+        return "Very Strong Match"
+    elif t_value >= 6.0 and overlap_years >= 70 and gleich_percent >= 65:
+        return "Strong Match"
+    elif t_value >= 5.0 and overlap_years >= 50 and gleich_percent >= 60:
+        return "Significant Match"
+    else:
+        return "Tentative/Insufficient Match"
+
+def _generate_plot_report_text(analysis_dict: Dict) -> str:
+    """Generates the narrative report string for embedding in the plot with specific line breaks."""
+    if not analysis_dict:
+        return "Analysis data not available."
+
+    res = analysis_dict
+    report_lines = []
+    width = 45  # Define a consistent wrap width for long lines
+
+    # --- Add a blank line after the title/separator for spacing ---
+    report_lines.append("") 
+
+    # --- Physical Description broken into individual lines ---
+    is_two_piece = res.get('analysis_mode') == 'two_piece'
+    line_belly = f"The belly is constructed from {'two sections' if is_two_piece else 'one section'}."
+    report_lines.append(textwrap.fill(line_belly, width=width))
+
+    if is_two_piece:
+        bass_rev, treble_rev = res.get('reverse_bass', False), res.get('reverse_treble', False)
+        if bass_rev and treble_rev: orientation_desc = "Both halves measured from centre joint outwards."
+        elif bass_rev: orientation_desc = "Bass measured from centre; treble from edge."
+        elif treble_rev: orientation_desc = "Treble measured from centre; bass from edge."
+        else: orientation_desc = "Both halves measured from outer edge inwards."
+    else:
+        orientation_desc = "Measured from centre joint outwards." if res.get('reverse_sample', False) else "Measured from outer edge inwards."
+    report_lines.append(textwrap.fill(orientation_desc, width=width))
+
+    ring_count = res.get('mean_series_length') if is_two_piece else len(res.get('raw_sample', []))
+    line_rings = f"The {'mean chronology' if is_two_piece else 'sample'} contains {ring_count} rings."
+    report_lines.append(textwrap.fill(line_rings, width=width))
+
+    # --- A blank line for spacing ---
+    report_lines.append("")
+
+    # --- The rest of the report ---
+    best_match = res.get('results', {}).get('best_match', {})
+    if best_match:
+        t_value, overlap, glk = best_match.get('t_value', 0.0), best_match.get('overlap_n', 0), best_match.get('glk', 0.0)
+        classification = _classify_dendro_match(t_value, overlap, glk)
+        end_year = int(best_match.get('end_year', 0))
+
+        if classification != "Tentative/Insufficient Match":
+            dating_result = f"A felling date after {end_year} is proposed. This is supported by a '{classification}' classification based on the multi-dimensional criteria."
+        else:
+            dating_result = f"While a potential end year of {end_year} is suggested, it should be classified as 'Tentative/Insufficient' in absence of further evidence."
+        report_lines.append(textwrap.fill(dating_result, width=width))
+    else:
+        report_lines.append("Dating analysis did not produce a statistically significant result.")
+    
+    if res.get('analysis_type') == 'detective':
+        df = res.get('enriched_results_df')
+        if df is not None and not df.empty:
+            top_match = df.iloc[0].to_dict()
+            t, o, g = top_match.get('t_value',0), top_match.get('overlap_n',0), top_match.get('glk',0)
+            top_classification = _classify_dendro_match(t, o, g)
+            top_location = top_match.get('location', 'N/A').strip()
+            
+            if top_location != 'N/A' and top_location and top_classification != "Tentative/Insufficient Match":
+                geo_conclusion = f"\nThe strongest match is a '{top_classification}' with a chronology from {top_location}, suggesting a probable geographic origin."
+                report_lines.append(textwrap.fill(geo_conclusion, width=width))
+
+    return "\n".join(report_lines)
 
 def _parse_rwl_header(file_path: str) -> dict:
     """Parses the first 3 lines of an RWL file to extract metadata."""
@@ -122,41 +196,114 @@ def cross_date(sample_series: pd.Series, master_series: pd.Series, min_overlap: 
     if rdf['t_value'].isnull().all(): return {"error": "Correlation calculation failed for all overlaps."}
     return {"best_match": rdf.loc[rdf['t_value'].idxmax()].to_dict(), "all_correlations": rdf.set_index('end_year')}
 
-def plot_results(raw_sample, master_detrended, detrended_sample, results, sample_filename, master_filename, reference_is_rwl=False, raw_master=None, sample_spline_fit=None, **kwargs):
+def plot_results(analysis_dict: Dict):
     print("Generating enhanced diagnostic plot...")
-    if "error" in results: print(f"Cannot plot: {results['error']}"); return
-    best_match = results['best_match']; all_correlations = results['all_correlations']
+    # Extract data from the main dictionary
+    raw_sample = analysis_dict.get('raw_sample')
+    master_detrended = analysis_dict.get('master_detrended')
+    detrended_sample = analysis_dict.get('detrended_sample')
+    results = analysis_dict.get('results')
+    sample_filename = analysis_dict.get('sample_filename')
+    master_filename = analysis_dict.get('master_filename')
+    reference_is_rwl = analysis_dict.get('reference_is_rwl', False)
+    raw_master = analysis_dict.get('raw_master')
+    sample_spline_fit = analysis_dict.get('sample_spline_fit')
+
+    if "error" in results:
+        print(f"Cannot plot: {results['error']}")
+        return
+        
+    best_match = results['best_match']
+    all_correlations = results['all_correlations']
     best_end_year = int(best_match['end_year'])
     r_val, t_val, n_val, glk_val = best_match['correlation'], best_match['t_value'], int(best_match['overlap_n']), best_match.get('glk', 0.0)
     best_start_year = best_end_year - (raw_sample.index.max() - raw_sample.index.min())
-    sample_index_at_best = pd.RangeIndex(start=best_start_year, stop=best_end_year + 1)
-    overlap_index = master_detrended.index.intersection(sample_index_at_best)
-    overlap_start_year, overlap_end_year = (overlap_index.min(), overlap_index.max()) if not overlap_index.empty else (best_start_year, best_end_year)
-    fig = plt.figure(figsize=(21, 10)); plt.style.use('seaborn-v0_8-whitegrid')
-    sample_label, master_label = os.path.basename(sample_filename), os.path.basename(master_filename)
-    ax1 = plt.subplot(2, 2, 1); ax1.plot(all_correlations.index, all_correlations['t_value'], color='gray', zorder=1, label=f'All Offsets (Best t={t_val:.2f})')
+    
+    # Main 2x2 GridSpec with manual spacing for stability
+    fig = plt.figure(figsize=(20, 11))
+    gs_main = fig.add_gridspec(2, 2, width_ratios=[1, 1.05], height_ratios=[1, 1],
+                               left=0.05, right=0.97, top=0.93, bottom=0.08,
+                               wspace=0.15, hspace=0.25)
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    sample_label = os.path.basename(sample_filename)
+    master_label = os.path.basename(master_filename)
+    
+    # Graph 1: T-Value plot (Top-Left)
+    ax1 = fig.add_subplot(gs_main[0, 0])
+    ax1.plot(all_correlations.index, all_correlations['t_value'], color='gray', zorder=1, label=f'All Offsets (Best t={t_val:.2f})')
     ax1.scatter(best_end_year, t_val, color='red', s=120, zorder=2, ec='black', label=f'Best Match Year: {best_end_year}')
-    ax1.axhline(3.5, color='orange', linestyle='--', linewidth=1, label='t=3.5 (Significant)'); ax1.axhline(5.0, color='firebrick', linestyle='--', linewidth=1, label='t=5.0 (Very Strong)')
-    ax1.set_xlabel("Potential End Year of Sample"); ax1.set_ylabel("T-Value"); ax1.set_title("1. Cross-Dating Significance Plot"); ax1.legend()
-    ax2 = plt.subplot(2, 2, 2); aligned_sample_detrended = detrended_sample.copy(); aligned_sample_detrended.index = aligned_sample_detrended.index - aligned_sample_detrended.index.min() + best_start_year
-    ax2.plot(master_detrended.index, master_detrended.values, label=f'Reference: {master_label}', color='blue', alpha=0.8)
+    ax1.axhline(5.0, color='orange', linestyle='--', linewidth=1, label='t=5.0 (Significant)'); ax1.axhline(7.0, color='firebrick', linestyle='--', linewidth=1, label='t=7.0 (Very Strong)')
+    ax1.set_xlabel("Potential End Year"); ax1.set_ylabel("T-Value"); ax1.set_title("1. Cross-Dating Significance"); ax1.legend()
+
+    # Graph 2: Aligned Detrended (Top-Right)
+    ax2 = fig.add_subplot(gs_main[0, 1])
+    aligned_sample_detrended = detrended_sample.copy(); aligned_sample_detrended.index += (best_start_year - 1)
+    ax2.plot(master_detrended.index, master_detrended.values, label=f'Ref: {master_label}', color='blue', alpha=0.8)
     ax2.plot(aligned_sample_detrended.index, aligned_sample_detrended.values, label=f'Sample: {sample_label}', color='red', linestyle='--')
-    ax2.axvspan(overlap_start_year, overlap_end_year, color='gray', alpha=0.2, label=f'Overlap Region (n={n_val})'); ax2.set_xlim(overlap_start_year - 20, overlap_end_year + 20)
-    ax2.set_xlabel("Year"); ax2.set_ylabel("Detrended Index"); ax2.set_title(f"2. Aligned Detrended Series (r={r_val:.3f})"); ax2.legend()
-    ax3 = plt.subplot(2, 2, 3); aligned_raw_sample = raw_sample.copy(); aligned_raw_sample.index = aligned_raw_sample.index - aligned_raw_sample.index.min() + best_start_year
+    overlap_index = master_detrended.index.intersection(aligned_sample_detrended.index)
+    if not overlap_index.empty: ax2.axvspan(overlap_index.min(), overlap_index.max(), color='gray', alpha=0.2, label=f'Overlap (n={n_val})')
+    ax2.set_xlim(overlap_index.min() - 20, overlap_index.max() + 20) if not overlap_index.empty else None
+    ax2.set_xlabel("Year"); ax2.set_ylabel("Detrended Index"); ax2.set_title(f"2. Aligned Detrended (r={r_val:.3f})"); ax2.legend()
+
+    # Graph 3: Raw Data Visual Match (Bottom-Left)
+    ax3 = fig.add_subplot(gs_main[1, 0], sharex=ax2)
+    aligned_raw_sample = raw_sample.copy(); aligned_raw_sample.index += (best_start_year - 1)
     ax3.plot(aligned_raw_sample.index, aligned_raw_sample.values, label=f'Sample: {sample_label}', color='green')
     if sample_spline_fit is not None and not sample_spline_fit.empty:
-        aligned_spline = sample_spline_fit.copy(); aligned_spline.index = aligned_spline.index - aligned_spline.index.min() + best_start_year
+        aligned_spline = sample_spline_fit.copy(); aligned_spline.index += (best_start_year - 1)
         ax3.plot(aligned_spline.index, aligned_spline.values, color='green', linestyle='--', label='Detrending Spline')
-    if reference_is_rwl and raw_master is not None: ax3.plot(raw_master.index, raw_master.values, label=f'Reference: {master_label}', color='black', alpha=0.7)
+    if reference_is_rwl and raw_master is not None: ax3.plot(raw_master.index, raw_master.values, label=f'Ref: {master_label}', color='black', alpha=0.7)
     else: rescaled_master_for_plot = master_detrended * raw_sample.mean(); ax3.plot(rescaled_master_for_plot.index, rescaled_master_for_plot.values, label=f'Ref (scaled): {master_label}', color='black', alpha=0.7)
-    ax3.axvspan(overlap_start_year, overlap_end_year, color='gray', alpha=0.2); ax3.set_xlim(overlap_start_year - 20, overlap_end_year + 20)
+    if not overlap_index.empty: ax3.axvspan(overlap_index.min(), overlap_index.max(), color='gray', alpha=0.2)
     ax3.set_xlabel("Year"); ax3.set_ylabel("Ring Width (mm)"); ax3.set_title("3. Raw Data Visual Match"); ax3.legend()
-    ax4 = plt.subplot(2, 2, 4); ax4.axis('off')
-    summary_text = textwrap.dedent(f"""Cross-Dating Report\n-----------------------------\nSample File: {sample_label}\nReference File: {master_label}\n\nMost Likely End Year: {best_end_year}\n(Sample Start Year: {best_start_year})\n\nStatistics for this Position:\n  Correlation (r): {r_val:.4f}\n  T-Value: {t_val:.4f}\n  Gleichläufigkeit (Glk): {glk_val:.1f}%\n  Overlap (n years): {n_val}\n    """)
-    ax4.text(0.05, 0.95, summary_text, ha='left', va='top', fontsize=12, fontfamily='monospace', bbox=dict(boxstyle="round,pad=0.5", fc='aliceblue', ec='lightsteelblue', lw=2))
-    ax4.set_title("4. Summary Statistics"); plt.suptitle(f"Cross-Dating Analysis: {sample_label} vs. {master_label}", fontsize=16, fontweight='bold'); plt.tight_layout(rect=[0, 0, 1, 0.96]); plt.show()
 
+    # Nested GridSpec with a small, fixed space
+    gs_nested = gs_main[1, 1].subgridspec(1, 2, wspace=0.1, hspace=0)
+
+    # Prepare text for both boxes
+    summary_text_body = textwrap.dedent(f"""
+    Sample: {sample_label}
+    Reference: {master_label}
+
+    Most Likely End Year: {best_end_year}
+    (Start Year: {best_start_year})
+
+    Best Match Statistics:
+      T-Value: {t_val:.2f}
+      Correlation (r): {r_val:.2f}
+      GLK (%): {glk_val:.1f}
+      Overlap (n): {n_val}
+    """)
+    summary_text_full = "Statistical Summary\n" + "-"*25 + "\n" + summary_text_body
+    
+    narrative_text_body = _generate_plot_report_text(analysis_dict)
+    narrative_text_full = "Analysis Report\n" + "-"*25 + "\n" + narrative_text_body
+    
+    # --- CHANGE 1: Force both text boxes to have the same height by padding the shorter one. ---
+    summary_lines = summary_text_full.count('\n')
+    narrative_lines = narrative_text_full.count('\n')
+
+    if summary_lines > narrative_lines:
+        padding = '\n' * (summary_lines - narrative_lines)
+        narrative_text_full += padding
+    elif narrative_lines > summary_lines:
+        padding = '\n' * (narrative_lines - summary_lines)
+        summary_text_full += padding
+
+    # Box 4: Statistics Summary (Nested Left)
+    ax4 = fig.add_subplot(gs_nested[0, 0]); ax4.axis('off')
+    ax4.text(0.0, 1.0, summary_text_full, ha='left', va='top', fontsize=11, fontfamily='monospace',
+             bbox=dict(boxstyle="round,pad=0.5", fc='whitesmoke', ec='grey', lw=1))
+    
+    # Box 5: Narrative Report (Nested Right)
+    ax5 = fig.add_subplot(gs_nested[0, 1]); ax5.axis('off')
+    ax5.text(0.0, 1.0, narrative_text_full, ha='left', va='top', fontsize=11, fontfamily='monospace',
+             bbox=dict(boxstyle="round,pad=0.5", fc='aliceblue', ec='lightsteelblue', lw=1.5))
+    
+    fig.suptitle(f"Cross-Dating Analysis: {sample_label} vs. {master_label}", fontsize=16, fontweight='bold');
+    plt.show()
+    
 def get_metadata_from_rwl(file_path):
     series = _build_master_from_rwl_file(file_path)
     if series.empty: return None
@@ -192,7 +339,7 @@ def run_date_analysis(sample_file, master_file, min_overlap=50, is_internal_test
     return {'raw_sample': sample_chrono, 'master_detrended': master_detrended, 'detrended_sample': sample_detrended, 
             'results': analysis_results, 'sample_filename': sample_file, 'master_filename': master_file, 
             'reference_is_rwl': reference_is_rwl, 'raw_master': master_chrono if not is_internal_test else None,
-            'sample_spline_fit': sample_spline_fit, 'reverse_sample': reverse_sample}
+            'sample_spline_fit': sample_spline_fit, 'reverse_sample': reverse_sample, 'analysis_mode': 'single'}
 
 def process_single_file(args):
     filename, sample_detrended, sample_basename, base_path, min_overlap, spline_stiffness_pct = args
@@ -241,7 +388,6 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
     results_df = pd.DataFrame(all_best_results).sort_values(by='t_value', ascending=False)
     top_results = results_df.head(top_n)
     
-    # --- NEW: Enrich results with header info for the report ---
     header_infos = [_parse_rwl_header(os.path.join(base_path_for_masters, row.source_file)) for _, row in top_results.iterrows()]
     header_df = pd.DataFrame(header_infos, index=top_results.index)
     enriched_results_df = pd.concat([top_results, header_df], axis=1)
@@ -256,7 +402,9 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
     if not plot_data_dict:
         print("Could not generate plot for the top match.")
         return {"analysis_mode": "single", "analysis_type": "detective", "sample_file": sample_file, "target": target, "min_overlap": min_overlap, "min_end_year": min_end_year, "enriched_results_df": enriched_results_df}
-    plot_data_dict.update({"analysis_type": "detective", "enriched_results_df": enriched_results_df, "min_end_year": min_end_year})
+    
+    # Update dictionary with all detective mode context
+    plot_data_dict.update({"analysis_type": "detective", "enriched_results_df": enriched_results_df, "min_end_year": min_end_year, "target": target, "min_overlap": min_overlap, "top_n": top_n})
     return plot_data_dict
 
 def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, final_analysis_args, reverse_bass=False, reverse_treble=False, spline_stiffness_pct=67):
@@ -382,7 +530,7 @@ def run_create_master(input_folder, output_filename):
 
 # --- 4. MAIN DISPATCHER ---
 def main():
-    parser = argparse.ArgumentParser(description="Dendrochronology toolkit (V9.0).", formatter_class=argparse.RawTextHelpFormatter,
+    parser = argparse.ArgumentParser(description="Dendrochronology toolkit (V9.2).", formatter_class=argparse.RawTextHelpFormatter,
         epilog=textwrap.dedent("""
         WORKFLOW:
           1. python gogo.py index     (Downloads standard files and creates the index. Run once.)
@@ -426,16 +574,13 @@ def main():
         elif args.command == 'create':
             run_create_master(args.input_folder, args.output_filename)
         elif args.command == 'date':
-            # Note: Command-line version uses default stiffness and no reversal.
-            # These are advanced features primarily controlled via the GUI.
             result = run_date_analysis(args.sample_file, args.master_file, args.min_overlap)
             if result:
-                plot_results(**result)
+                plot_results(result) # Pass the whole dict
         elif args.command == 'detective':
-            # Note: Command-line version uses default stiffness and no reversal.
             result = run_detective_analysis(args.sample_file, args.target, args.top_n, args.min_overlap, min_end_year=args.min_end_year)
             if result:
-                plot_results(**result)
+                plot_results(result) # Pass the whole dict
     except Exception as e:
         print(f"\nFATAL ERROR: {e}")
 
