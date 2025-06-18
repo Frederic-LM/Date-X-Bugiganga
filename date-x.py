@@ -1,4 +1,4 @@
-# gogo_gui.py (Version 8.9 - Compatibility & Bug Fix)
+# Date-X.py (Version 8.9 - Compatibility & Bug Fix)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
