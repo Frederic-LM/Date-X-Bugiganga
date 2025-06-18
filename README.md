@@ -450,29 +450,6 @@ We welcome contributions to improve Date-X Bugiganga! Here's how you can help:
 
 ---
 
-## 📝 Changelog
-
-### Version 2.1.0 *(Current)*
-- ✨ Added two-piece mean analysis mode
-- 🔧 Improved GUI responsiveness for large datasets
-- 📊 Enhanced plot generation with narrative summaries
-- 🐛 Fixed memory issues with detective mode
-
-### Version 2.0.0
-- 🎨 Complete GUI redesign with tabbed interface
-- 🚀 Added CLI interface for batch processing
-- 🌍 Integrated NOAA database access
-- 📈 New comprehensive plotting system
-
-### Version 1.5.0
-- 🔬 Implemented Cubic Smoothing Spline detrending
-- 📊 Added multi-dimensional validation system
-- 🏗️ Master chronology building tools
-
-[View Full Changelog →](CHANGELOG.md)
-
----
-
 ## 📄 License
 
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
