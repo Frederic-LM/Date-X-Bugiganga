@@ -113,8 +113,7 @@ python Date-X.py
 
 ### Reference
 - [📚 Methods & References](#-methods--references)
-- [🤝 Contributing](#-contributing)
-- [📝 Changelog](#-changelog)
+
 
 ---
 
