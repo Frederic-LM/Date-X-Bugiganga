@@ -1,4 +1,4 @@
-# gogo_gui.py (Version 8.4 - Sample Reversal Feature)
+# date-x.py a gogo gui (Version 8.6 - Final Methodology & UI)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -25,8 +25,8 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("GoGo Dendro-Dating Tool v8.4")
-        self.geometry("850x800") # Slightly wider for new checkboxes
+        self.title("GoGo Dendro-Dating Tool v8.6")
+        self.geometry("850x800")
         self.settings_file = "gogo_settings.json"
         
         self.last_analysis_results = None
@@ -42,7 +42,15 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.check_plot_queue()
         print("Welcome! Ready for analysis.")
-    # ... (on_closing, save_settings, load_settings, check_plot_queue, _run_in_thread, etc. are unchanged)...
+
+    # --- Helper to parse stiffness value from GUI string ---
+    def _get_stiffness_from_string(self, value_str):
+        """Parses 'Standard (67%)' into the integer 67."""
+        try:
+            return int(value_str.split('(')[1].split('%')[0])
+        except (IndexError, ValueError):
+            return 67 # Fallback to default if parsing fails
+
     def on_closing(self):
         print("Saving settings..."); self.save_settings(); self.destroy()
 
@@ -97,6 +105,7 @@ class App(tk.Tk):
         self._create_detective_tab()
         self._create_master_tab()
         self._create_index_build_tab()
+        self._create_methodology_tab()
 
     def _create_report_widget(self):
         report_frame = ttk.LabelFrame(self, text="Report Generation")
@@ -113,10 +122,8 @@ class App(tk.Tk):
         
     def _create_date_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="1. Date")
-        # --- NEW: BooleanVars for checkboxes ---
         self.date_reverse_sample_var = tk.BooleanVar()
         self.date_reverse_treble_var = tk.BooleanVar()
-
         type_frame = ttk.LabelFrame(tab, text="Analysis Type"); type_frame.pack(padx=20, pady=5, fill="x")
         self.date_type_var = tk.StringVar(value="single")
         def toggle():
@@ -126,38 +133,36 @@ class App(tk.Tk):
                 self.date_treble_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
                 self.date_treble_entry.grid(row=1, column=1, padx=5, pady=5)
                 self.date_treble_browse.grid(row=1, column=2, padx=5, pady=5)
-                self.date_treble_reverse_check.grid(row=1, column=3, padx=5, pady=5) # Show treble reverse
+                self.date_treble_reverse_check.grid(row=1, column=3, padx=5, pady=5)
                 self.date_sample_label.config(text="Bass Side File (.rwl):")
             else: self.date_sample_label.config(text="Sample File (.rwl):")
             self._update_default_overlap()
         ttk.Radiobutton(type_frame, text="Single Sample", variable=self.date_type_var, value="single", command=toggle).pack(side="left", padx=10)
         ttk.Radiobutton(type_frame, text="Two-Piece Mean", variable=self.date_type_var, value="two_piece", command=toggle).pack(side="left", padx=10)
-        
         frame = ttk.LabelFrame(tab, text="File Inputs & Options"); frame.pack(padx=20, pady=5, fill="x")
         self.date_sample_label = ttk.Label(frame, text="Sample File (.rwl):"); self.date_sample_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.date_sample_entry = ttk.Entry(frame, width=60); self.date_sample_entry.grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(frame, text="Browse...", command=self._browse_for_sample_file).grid(row=0, column=2, padx=5, pady=5)
         ttk.Checkbutton(frame, text="Reverse", variable=self.date_reverse_sample_var).grid(row=0, column=3, padx=5, pady=5)
-
         self.date_treble_label = ttk.Label(frame, text="Treble Side File (.rwl):"); self.date_treble_entry = ttk.Entry(frame, width=60)
         self.date_treble_browse = ttk.Button(frame, text="Browse...", command=lambda: self._browse_file(self.date_treble_entry, callback=self._update_default_overlap))
         self.date_treble_reverse_check = ttk.Checkbutton(frame, text="Reverse", variable=self.date_reverse_treble_var)
-        
         ttk.Label(frame, text="Reference File (.csv/.rwl):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.date_master_entry = ttk.Entry(frame, width=60); self.date_master_entry.grid(row=2, column=1, padx=5, pady=5)
         ttk.Button(frame, text="Browse...", command=lambda: self._browse_file(self.date_master_entry, is_master=True)).grid(row=2, column=2, padx=5, pady=5)
         ttk.Label(frame, text="Minimum Overlap (years):").grid(row=3, column=0, padx=5, pady=10, sticky="w")
         self.date_min_overlap_spinbox = ttk.Spinbox(frame, from_=30, to=500, increment=10, width=5); self.date_min_overlap_spinbox.set(50)
         self.date_min_overlap_spinbox.grid(row=3, column=1, padx=5, pady=10, sticky="w")
+        ttk.Label(frame, text="Detrending Stiffness:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        self.date_stiffness_combo = ttk.Combobox(frame, values=['Standard (67%)', 'Stiff (80%)'], width=15, state="readonly"); self.date_stiffness_combo.set('Standard (67%)')
+        self.date_stiffness_combo.grid(row=4, column=1, padx=5, pady=5, sticky="w")
         run_button = ttk.Button(tab, text="Run Date Analysis", command=self._run_date); run_button.pack(pady=10)
         toggle()
 
     def _create_detective_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="2. Detective")
-        # --- NEW: BooleanVars for checkboxes ---
         self.detective_reverse_sample_var = tk.BooleanVar()
         self.detective_reverse_treble_var = tk.BooleanVar()
-
         type_frame = ttk.LabelFrame(tab, text="Analysis Type"); type_frame.pack(padx=20, pady=5, fill="x")
         self.detective_type_var = tk.StringVar(value="single")
         def toggle():
@@ -173,21 +178,18 @@ class App(tk.Tk):
             self._update_default_overlap()
         ttk.Radiobutton(type_frame, text="Single Sample", variable=self.detective_type_var, value="single", command=toggle).pack(side="left", padx=10)
         ttk.Radiobutton(type_frame, text="Two-Piece Mean", variable=self.detective_type_var, value="two_piece", command=toggle).pack(side="left", padx=10)
-        
         frame = ttk.LabelFrame(tab, text="File Inputs"); frame.pack(padx=20, pady=5, fill="x")
         self.detective_sample_label = ttk.Label(frame, text="Sample File (.rwl):"); self.detective_sample_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.detective_sample_entry = ttk.Entry(frame, width=60); self.detective_sample_entry.grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(frame, text="Browse...", command=self._browse_for_sample_file).grid(row=0, column=2, padx=5, pady=5)
         ttk.Checkbutton(frame, text="Reverse", variable=self.detective_reverse_sample_var).grid(row=0, column=3, padx=5, pady=5)
-
         self.detective_treble_label = ttk.Label(frame, text="Treble Side File (.rwl):"); self.detective_treble_entry = ttk.Entry(frame, width=60)
         self.detective_treble_browse = ttk.Button(frame, text="Browse...", command=lambda: self._browse_file(self.detective_treble_entry, callback=self._update_default_overlap))
         self.detective_treble_reverse_check = ttk.Checkbutton(frame, text="Reverse", variable=self.detective_reverse_treble_var)
-        
         target_frame = ttk.LabelFrame(tab, text="Reference Target"); target_frame.pack(padx=20, pady=5, fill="x")
         self.detective_target_var = tk.StringVar(value="category")
         ttk.Radiobutton(target_frame, text="Predefined Category:", variable=self.detective_target_var, value="category").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.detective_category_combo = ttk.Combobox(target_frame, values=['alpine', 'baltic', 'all']); self.detective_category_combo.set('alpine')
+        self.detective_category_combo = ttk.Combobox(target_frame, values=['alpine', 'baltic', 'all'], state="readonly"); self.detective_category_combo.set('alpine')
         self.detective_category_combo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         ttk.Radiobutton(target_frame, text="Local Folder:", variable=self.detective_target_var, value="folder").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.detective_folder_entry = ttk.Entry(target_frame, width=60); self.detective_folder_entry.grid(row=1, column=1, padx=5, pady=5)
@@ -202,10 +204,12 @@ class App(tk.Tk):
         ttk.Label(options_frame, text="Only Include Sites Ending After:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.detective_min_end_year_spinbox = ttk.Spinbox(options_frame, from_=0, to=2100, increment=50, width=5); self.detective_min_end_year_spinbox.set(1500)
         self.detective_min_end_year_spinbox.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        ttk.Label(options_frame, text="Detrending Stiffness:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.detective_stiffness_combo = ttk.Combobox(options_frame, values=['Standard (67%)', 'Stiff (80%)'], width=15, state="readonly"); self.detective_stiffness_combo.set('Standard (67%)')
+        self.detective_stiffness_combo.grid(row=3, column=1, padx=5, pady=5, sticky="w")
         run_button = ttk.Button(tab, text="Run Detective Analysis", command=self._run_detective); run_button.pack(pady=10)
         toggle()
 
-    # ... (_create_master_tab, _create_index_build_tab, and helper functions are unchanged) ...
     def _create_master_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="3. Create Master")
         frame = ttk.LabelFrame(tab, text="Create a Custom Master Chronology"); frame.pack(padx=20, pady=20, fill="x")
@@ -228,12 +232,88 @@ class App(tk.Tk):
         build_options_grid = ttk.Frame(build_frame)
         build_options_grid.pack(pady=5)
         ttk.Label(build_options_grid, text="Select a predefined master to build:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.build_target_combo = ttk.Combobox(build_options_grid, values=['alpine', 'baltic', 'all']); self.build_target_combo.set('all')
+        self.build_target_combo = ttk.Combobox(build_options_grid, values=['alpine', 'baltic', 'all'], state="readonly"); self.build_target_combo.set('all')
         self.build_target_combo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         ttk.Label(build_options_grid, text="Only Include Sites Ending After:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
         self.build_min_end_year_spinbox = ttk.Spinbox(build_options_grid, from_=0, to=2100, increment=50, width=5); self.build_min_end_year_spinbox.set(1500)
         self.build_min_end_year_spinbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.build_button = ttk.Button(build_frame, text="Build Selected", command=self._run_build); self.build_button.pack(pady=10)
+
+    # UPDATED: The methodology tab content is now much more detailed.
+    def _create_methodology_tab(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="5. Methodology")
+        text_frame = ttk.Frame(tab)
+        text_frame.pack(padx=10, pady=10, expand=True, fill="both")
+        methodology_text = tk.Text(text_frame, wrap=tk.WORD, padx=5, pady=5, font=("Helvetica", 10), background="#f0f0f0")
+        scrollbar = ttk.Scrollbar(text_frame, command=methodology_text.yview)
+        methodology_text.config(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        methodology_text.pack(side=tk.LEFT, expand=True, fill="both")
+
+        # --- CONTENT WITH EXPLICIT FORMULAS ---
+        content = textwrap.dedent("""
+            This document explains the scientific choices and methods used by this software to ensure accurate and reliable dendrochronological analysis.
+
+            --- MEASUREMENT DIRECTION (CRITICAL!) ---
+            For two-piece, book-matched instrument tops, the wood is processed in a way that places the YOUNGEST wood at the CENTER JOINT and the OLDEST wood at the OUTER EDGES.
+
+            Therefore, the correct measurement direction is:
+            FROM THE OUTER EDGE (Ring 1) INWARDS TO THE CENTER JOINT (Final Ring).
+
+            HOWEVER If rare cases you could come across samples that need to be process in the opposite direction, use the "Reverse" checkbox next to the sample file input.
+
+            --- DETRENDING METHODOLOGY ---
+            Tree ring data contains two main signals: a long-term age trend and the short-term climate signal. To accurately cross-date, we must remove the age trend to isolate the climate signal. This process is called detrending. This software uses a cubic smoothing spline.
+
+            • Standard (67%): This is the scientific default, best for general-purpose dating. It is flexible and excellent at removing strong age trends from a wide variety of "complacent" trees.
+
+            • Stiff (80%): This is a less flexible spline, better for "sensitive" trees (like high-altitude Alpine spruce) that have a weak age trend but a strong climate signal. The stiffer spline is less likely to accidentally remove the climate signal itself.
+
+            --- STATISTICAL VALIDATION ---
+            • T-Value: The primary statistic for determining a match. It combines the correlation coefficient (r) with the length of the overlap (n). A high T-Value over a long overlap is a strong indicator of a correct match.
+                - T > 3.5 is a significant match.
+                - T > 5.0 is a very strong and reliable match.
+
+            • Correlation (r): A standard measure of how well two series move together, from -1 to +1.
+
+            • GLK (Gleichläufigkeit): Measures the percentage of years where the two series move in the same direction. High GLK (>65%) provides excellent secondary confirmation.
+
+            --- EXPLICIT FORMULAS ---
+            1. Spline Smoothing Factor (s):
+            The "stiffness" of the detrending spline is controlled by a smoothing factor `s`, calculated based on the chosen stiffness percentage (`p`) and the length of the series (`n`):
+                s = n * (p / 100)^3
+
+            2. Student's T-Value (t):
+            This converts the Pearson correlation coefficient `r` into a more robust significance score based on the overlap length `n`:
+                t = r * sqrt( (n - 2) / (1 - r^2) )
+
+            3. Gleichläufigkeit (GLK):
+            Calculated as the percentage of agreement in the sign of the first difference of the two series (`x` and `y`) over the overlapping interval of length `n`:
+                Agreement = sum( sign(x[i] - x[i-1]) == sign(y[i] - y[i-1]) )
+                GLK = (Agreement / (n - 1)) * 100
+                
+            ---  SCIENTIFIC REFERENCES ---
+            • Baillie, M.G.L. and Pilcher, J.R. (1973). "A simple cross-dating program for tree-ring research." Tree-Ring Bulletin 33, 7-14.
+              (Establishes the use of the Student's t-test for robust statistical cross-dating).
+
+            • Cook, E.R. and Peters, K. (1981). "The smoothing spline: a new approach to standardizing tree-ring width series for dendroclimatic studies." Tree-Ring Bulletin 41, 45-53.
+              (The foundational paper for using the cubic smoothing spline and the 67% stiffness standard).
+
+            • Eckstein, D. and Bauch, J. (1969). "Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens und zur Analyse seiner Aussagesicherheit." Forstwiss. Centralbl. 88, 230-250.
+              (A key paper introducing and validating the Gleichläufigkeit (GLK) statistic).
+
+            • Fritts, H.C. (1976). Tree Rings and Climate. Academic Press, New York.
+              (The foundational textbook for the entire field of dendrochronology).    
+
+            --- DATA HANDLING ---
+            • Floating Series: When you load a sample, the software intentionally ignores any baked-in dates. It treats the ring pattern as an undated, "floating" series to ensure the analysis is an unbiased scientific verification.
+
+            • Multi-Series Files: Some .rwl files contain multiple series (e.g., treble, bass, back). This tool's parser is designed for one series per file. Use the companion script `rework_rwl.py` to automatically split these complex files before analysis.
+        """)
+        methodology_text.config(state=tk.NORMAL)
+        methodology_text.insert(tk.END, content)
+        methodology_text.config(state=tk.DISABLED)
 
     def _get_rwl_length(self, file_path):
         if not file_path or not os.path.exists(file_path): return 0
@@ -292,18 +372,18 @@ class App(tk.Tk):
         analysis_type = self.date_type_var.get()
         min_overlap = int(self.date_min_overlap_spinbox.get())
         master = self.date_master_entry.get()
+        stiffness_pct = self._get_stiffness_from_string(self.date_stiffness_combo.get())
         if not master: messagebox.showerror("Error", "Please select a reference file."); return
         if analysis_type == "single":
             sample = self.date_sample_entry.get()
             if not sample: messagebox.showerror("Error", "Please select a sample file."); return
             reverse_sample = self.date_reverse_sample_var.get()
-            self._run_in_thread(run_date_analysis, (sample, master, min_overlap, False, reverse_sample), run_button, is_analysis=True)
+            self._run_in_thread(run_date_analysis, (sample, master, min_overlap, False, reverse_sample, stiffness_pct), run_button, is_analysis=True)
         else:
             bass = self.date_sample_entry.get(); treble = self.date_treble_entry.get()
             if not bass or not treble: messagebox.showerror("Error", "Please select both bass and treble files."); return
-            reverse_bass = self.date_reverse_sample_var.get()
-            reverse_treble = self.date_reverse_treble_var.get()
-            final_args = ["placeholder", master, min_overlap] # Note: final_analysis_func doesn't have reverse flag, handled in two_piece func
+            reverse_bass = self.date_reverse_sample_var.get(); reverse_treble = self.date_reverse_treble_var.get()
+            final_args = ["placeholder", master, min_overlap, False, False, stiffness_pct]
             self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_date_analysis, final_args, reverse_bass, reverse_treble), run_button, is_analysis=True)
 
     def _run_detective(self):
@@ -313,19 +393,19 @@ class App(tk.Tk):
         else: target = self.detective_folder_entry.get()
         if not target: messagebox.showerror("Error", "Please select a target category or folder."); return
         top_n = int(self.detective_top_n_spinbox.get()); min_overlap = int(self.detective_min_overlap_spinbox.get()); min_end_year = int(self.detective_min_end_year_spinbox.get())
+        stiffness_pct = self._get_stiffness_from_string(self.detective_stiffness_combo.get())
         if analysis_type == "single":
             sample = self.detective_sample_entry.get()
             if not sample: messagebox.showerror("Error", "Please select a sample file."); return
             reverse_sample = self.detective_reverse_sample_var.get()
-            self._run_in_thread(run_detective_analysis, (sample, target, top_n, min_overlap, min_end_year, reverse_sample), run_button, is_analysis=True)
+            self._run_in_thread(run_detective_analysis, (sample, target, top_n, min_overlap, min_end_year, reverse_sample, stiffness_pct), run_button, is_analysis=True)
         else:
             bass = self.detective_sample_entry.get(); treble = self.detective_treble_entry.get()
             if not bass or not treble: messagebox.showerror("Error", "Please select both bass and treble files."); return
-            reverse_bass = self.detective_reverse_sample_var.get()
-            reverse_treble = self.detective_reverse_treble_var.get()
-            final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False] # Reversal is handled in two_piece func
+            reverse_bass = self.detective_reverse_sample_var.get(); reverse_treble = self.detective_reverse_treble_var.get()
+            final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False, stiffness_pct]
             self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_detective_analysis, final_args, reverse_bass, reverse_treble), run_button, is_analysis=True)
-    # ... (other run methods unchanged) ...
+
     def _run_create(self):
         folder = self.create_folder_entry.get(); output = self.create_output_entry.get()
         if not folder or not output: messagebox.showerror("Error", "Please select an input folder and an output file."); return
@@ -342,7 +422,7 @@ class App(tk.Tk):
             self._run_in_thread(build_master_from_index, ("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750, min_end_year), self.build_button)
         if target in ['baltic', 'all']: 
             self._run_in_thread(build_master_from_index, ("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750, min_end_year), self.build_button)
-    # ... (_generate_report unchanged) ...
+
     def _generate_report(self):
         if not self.last_analysis_results: messagebox.showerror("Error", "No analysis data found."); return
         res = self.last_analysis_results
@@ -358,19 +438,18 @@ class App(tk.Tk):
             report_lines.append(f"  T-Value:              {stats['t_value']:.2f}")
             report_lines.append(f"  Gleichläufigkeit (Glk): {stats.get('glk', 0.0):.1f}%\n")
             report_lines.append("--- 3. FINAL ANALYSIS OF MEAN CHRONOLOGY ---")
-        else: # Single Mode
+        else:
             report_lines.append("--- 1. SAMPLE INFORMATION ---")
             report_lines.append(f"Analysis Mode: Single Sample")
             report_lines.append(f"  Sample File: {os.path.basename(res.get('sample_file') or res.get('sample_filename'))}\n")
             report_lines.append("--- 2. FINAL ANALYSIS RESULTS ---")
-            
         if res.get('analysis_type') == 'detective':
             report_lines.append(f"Reference Target: {res['target']}")
             report_lines.append(f"Minimum Overlap: {res['min_overlap']} years")
             report_lines.append(f"Sites Ending Before {res.get('min_end_year', 1500)} Were Excluded.\n")
             df = res['results_df'][['end_year', 't_value', 'glk', 'correlation', 'overlap_n', 'source_file']]
             report_lines.append(df.to_string(index=False))
-        else: # Date mode
+        else: 
             best = res['results']["best_match"]
             report_lines.append(f"Reference: {os.path.basename(res['master_filename'])}\n")
             report_lines.append(f"Most Likely End Year: {int(best['end_year'])}")
@@ -378,7 +457,6 @@ class App(tk.Tk):
             report_lines.append(f"  Gleichläufigkeit (Glk): {best.get('glk', 0.0):.1f}%")
             report_lines.append(f"  Correlation (r):      {best['correlation']:.4f}")
             report_lines.append(f"  Overlap (n):          {int(best['overlap_n'])} years")
-        
         report_lines.extend(["\n\n--- NOTES & INTERPRETATION (User editable) ---", "\n[Enter qualitative analysis and conclusions here...]\n"])
         report_content = "\n".join(report_lines)
         report_filename = filedialog.asksaveasfilename(initialfile="dendro_report.txt", defaultextension=".txt", filetypes=(("Text Files", "*.txt"), ("All files", "*.*")))
