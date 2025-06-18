@@ -19,9 +19,7 @@
 
 ## 🎯 What is Date-X Bugiganga?
 
-**Date-X Bugiganga** is a comprehensive dendrochronology toolkit that combines cutting-edge statistical methods with user-friendly interfaces to provide accurate tree-ring dating. Whether you're analyzing musical instrument wood, archaeological samples, or building materials, this tool delivers reliable, scientifically-defensible results.
-
-### Why Choose Date-X Bugiganga?
+**Date-X Bugiganga** is a comprehensive dendrochronology toolkit that combines cutting-edge statistical methods with user-friendly interfaces to provide tree-ring dating, it features:
 
 - 🔬 **Scientific Rigor**: Multi-dimensional validation using T-Value, Overlap, and Gleichläufigkeit
 - 🚀 **Modern Methods**: Cubic Smoothing Spline detrending superior to traditional approaches  
