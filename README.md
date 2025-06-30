@@ -476,6 +476,6 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 
 ⭐ Star this repository if you find it useful!
 
-[🏠 Home](#-gogo--date-x-bugiganga-a-dendro-x-dating-tool) • [📚 Documentation](#-table-of-contents) • [🐛 Issues](https://github.com/Frederic-LM/Date-XBugiganga/issues) • [💬 Discussions](https://github.com/Frederic-LM/Date-XBugiganga/discussions)
+[🏠 Home](#-gogo--date-x-bugiganga-a-dendro-x-dating-tool) • [📚 Documentation](#-table-of-contents) • [🐛 Issues](https://github.com/Frederic-LM/Date-XBugiganga/issues) • [💬 
 
 </div>
