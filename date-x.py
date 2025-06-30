@@ -1,4 +1,4 @@
-# gogo_gui.py (Version 9.7 - Integrated Plot Reporting)
+# date-x.py (Version 9.8 - Integrated Violin Setup)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -9,7 +9,8 @@ try:
     from gogo import (
         download_and_index_files, build_master_from_index, run_create_master,
         run_date_analysis, run_detective_analysis, plot_results,
-        run_two_piece_mean_analysis, parse_as_floating_series
+        run_two_piece_mean_analysis, parse_as_floating_series,
+        fetch_and_build_violin_master
     )
 except ImportError as e:
     messagebox.showerror("Import Error", f"Could not import from gogo.py. Please ensure it is in the same directory and contains no syntax errors.\n\nDetails: {e}")
@@ -36,7 +37,7 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Date-X Bugiganga: A Dendro-Dating Tool v9.7") # Version bump
+        self.title("Date-X Bugiganga: A Dendro-Dating Tool v9.8") # Version bump
         self.geometry("1450x550")
         self.settings_file = "date-x_settings.json"
         self.last_analysis_results = None
@@ -246,7 +247,7 @@ class App(tk.Tk):
         target_frame = ttk.LabelFrame(tab, text="Reference Target"); target_frame.pack(padx=20, pady=5, fill="x")
         self.detective_target_var = tk.StringVar(value="category")
         ttk.Radiobutton(target_frame, text="Predefined Category:", variable=self.detective_target_var, value="category").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.detective_category_combo = ttk.Combobox(target_frame, values=['alpine', 'baltic', 'all'], state="readonly"); self.detective_category_combo.set('alpine')
+        self.detective_category_combo = ttk.Combobox(target_frame, values=['alpine', 'baltic', 'violin', 'all'], state="readonly"); self.detective_category_combo.set('violin')
         self.detective_category_combo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         ttk.Radiobutton(target_frame, text="Local Folder:", variable=self.detective_target_var, value="folder").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.detective_folder_entry = ttk.Entry(target_frame, width=60); self.detective_folder_entry.grid(row=1, column=1, padx=5, pady=5)
@@ -282,7 +283,8 @@ class App(tk.Tk):
         index_frame.pack(padx=20, pady=10, fill="x")
         self.index_button = ttk.Button(index_frame, text="Download and Create Index", command=self._run_download)
         self.index_button.pack(pady=5)
-        build_frame = ttk.LabelFrame(tab, text="Step 2: Build Master Chronologies from Index")
+        
+        build_frame = ttk.LabelFrame(tab, text="Step 2: Build General Master Chronologies")
         build_frame.pack(padx=20, pady=10, fill="x")
         build_options_grid = ttk.Frame(build_frame)
         build_options_grid.pack(pady=5)
@@ -293,6 +295,14 @@ class App(tk.Tk):
         self.build_min_end_year_spinbox = ttk.Spinbox(build_options_grid, from_=0, to=2100, increment=50, width=5); self.build_min_end_year_spinbox.set(1500)
         self.build_min_end_year_spinbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.build_button = ttk.Button(build_frame, text="Build Selected", command=self._run_build); self.build_button.pack(pady=10)
+
+        violin_frame = ttk.LabelFrame(tab, text="Step 3: Build Specialist Violin Master (Recommended)")
+        violin_frame.pack(padx=20, pady=10, fill="x")
+        violin_label = ttk.Label(violin_frame, wraplength=550, text="This gathers key .rwl files cited by dendrochronologists for violin dating from the downloaded cache and builds a dedicated master chronology named 'master_violin_chronology.csv' in the 'violin_references' folder.")
+        violin_label.pack(pady=(5,10), padx=5)
+        self.violin_button = ttk.Button(violin_frame, text="Fetch & Build Violin Reference", command=self._run_violin_setup)
+        self.violin_button.pack(pady=5)
+    
     def _create_methodology_tab(self):
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="5. Methods & References")
         text_frame = ttk.Frame(tab); text_frame.pack(padx=10, pady=10, expand=True, fill="both")
@@ -403,6 +413,8 @@ class App(tk.Tk):
             self._run_in_thread(build_master_from_index, ("Alpine Instrument Wood", ['PICEA', 'ABIES'], ['aust', 'fran', 'germ', 'ital', 'swit', 'slov'], 150, 1750, min_end_year), self.build_button)
         if target in ['baltic', 'all']: 
             self._run_in_thread(build_master_from_index, ("Baltic Northern Timber", ['PINUS', 'PICEA'], ['finl', 'germ', 'lith', 'norw', 'pola', 'swed'], 150, 1750, min_end_year), self.build_button)
+    def _run_violin_setup(self):
+        self._run_in_thread(fetch_and_build_violin_master, (), self.violin_button)
     
     def _classify_dendro_match(self, t_value, overlap_years, gleich_percent):
         """Classify match strength based on multi-dimensional thresholds."""
