@@ -1,4 +1,4 @@
-# gogo.py (Version 9.2 - Integrated Plot Reporting)
+# gogo.py (Version 9.8 - Integrated Violin Setup)
 # ==============================================================================
 import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import warnings
@@ -10,6 +10,17 @@ from scipy.stats import pearsonr
 from scipy.interpolate import UnivariateSpline
 
 warnings.filterwarnings("ignore", message="The maximal number of iterations")
+
+# This curated list is based on dendrochronological literature for violin wood (Cybis wiki).
+VIOLIN_FILES = [
+    "fran7.rwl","fran039.rwl","swit204.rwl","swit203.rwl","swit189.rwl","swit193.rwl",
+    "swit177.rwl","swit169.rwl","swit215.rwl","swit184.rwl","swit173.rwl","swit181.rwl",
+    "aust003.rwl","aust007.rwl","germ12.rwl","germ11.rwl","ital007.rwl","ital006.rwl",
+    "ital025.rwl","germ036.rwl","germ4.rwl","germ5.rwl","germ14.rwl","germ040.rwl",
+    "germ033.rwl","germ020.rwl","czec001.rwl","czec002.rwl","czec3.rwl","czec.rwl",
+    "pola022.rwl","pola019.rwl","pola020.rwl","roma002.rwl","roma005.rwl","yugo001.rwl",
+    "slov001.rwl","ital022.rwl","swed311.rwl","finl012.rwl","swed312.rwl","swed011.rwl"
+]
 
 def _classify_dendro_match(t_value, overlap_years, gleich_percent):
     """Classify match strength based on multi-dimensional thresholds. DUPLICATED LOGIC for backend independence."""
@@ -366,7 +377,13 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
     if min_overlap > len(sample_chrono): raise ValueError(f"CONFIG ERROR: min_overlap ({min_overlap}) > sample length ({len(sample_chrono)}).")
     sample_detrended, _ = detrend(sample_chrono, spline_stiffness_pct=spline_stiffness_pct)
     file_list, base_path_for_masters = [], ""
-    if os.path.isdir(target):
+    
+    if target == 'violin':
+        base_path_for_masters = "violin_references"
+        if not os.path.exists(base_path_for_masters) or not os.listdir(base_path_for_masters):
+             raise ValueError(f"The 'violin' category requires reference files in '{base_path_for_masters}'.\nPlease run the 'Fetch & Build Violin Reference' tool in the Setup tab first.")
+        file_list = [f for f in os.listdir(base_path_for_masters) if f.lower().endswith('.rwl')]
+    elif os.path.isdir(target):
         base_path_for_masters = target
         file_list = [f for f in os.listdir(target) if f.lower().endswith('.rwl')]
     else:
@@ -379,6 +396,7 @@ def run_detective_analysis(sample_file, target, top_n, min_overlap=80, min_end_y
         index_df = pd.read_csv(index_filename)
         df_filtered = index_df[(index_df['species'].isin(params['species'])) & (index_df['filename'].str.lower().str.startswith(tuple(params['countries']))) & (index_df['length'] >= params['min_len']) & (index_df['start_year'] < params['min_start']) & (index_df['end_year'] >= min_end_year)]
         file_list = df_filtered['filename'].tolist()
+
     if not file_list: raise ValueError(f"No reference files found for target '{target}' (including min_end_year={min_end_year}).")
     tasks = [(filename, sample_detrended, os.path.basename(sample_file), base_path_for_masters, min_overlap, spline_stiffness_pct) for filename in file_list]
     print(f"Testing against {len(file_list)} sites using {multiprocessing.cpu_count()} CPU cores...")
@@ -528,17 +546,57 @@ def run_create_master(input_folder, output_filename):
         print(f"--- SUCCESS! Saved to: '{output_filename}' ---")
     else: raise ValueError("Resulting chronology was empty.")
 
+def fetch_and_build_violin_master():
+    """
+    Fetches the curated violin reference files from the main cache
+    and builds a dedicated master chronology from them.
+    """
+    source_dir = "full_rwl_cache"
+    dest_dir = "violin_references"
+    master_filename = "master_violin_chronology.csv"
+    
+    print(f"\n--- Preparing Specialist Violin Reference ---")
+    if not os.path.isdir(source_dir):
+        raise FileNotFoundError(f"Source directory '{source_dir}' not found. Please run 'Download and Create Index' first.")
+
+    os.makedirs(dest_dir, exist_ok=True)
+    print(f"Destination folder '{dest_dir}' is ready.")
+
+    copied_count = 0
+    for filename in VIOLIN_FILES:
+        source_path = os.path.join(source_dir, filename)
+        if os.path.exists(source_path):
+            shutil.copy2(source_path, os.path.join(dest_dir, filename))
+            copied_count += 1
+        else:
+            print(f"Warning: '{filename}' not found in '{source_dir}'. Skipping.")
+    
+    print(f"\nGathering complete. Copied {copied_count} of {len(VIOLIN_FILES)} files to '{dest_dir}'.")
+    
+    if copied_count > 0:
+        print(f"\nNow building the master file: '{master_filename}'")
+        try:
+            # Call the existing create master logic
+            run_create_master(dest_dir, os.path.join(dest_dir, master_filename))
+            print(f"\nSUCCESS: Violin setup is complete. You can now use '{os.path.join(dest_dir, master_filename)}' as a reference or select the 'violin' category in the Detective tab.")
+        except Exception as e:
+            print(f"\nERROR building violin master: {e}")
+    else:
+        print("\nNo files were copied, so no master chronology was built.")
+
 # --- 4. MAIN DISPATCHER ---
 def main():
-    parser = argparse.ArgumentParser(description="Dendrochronology toolkit (V9.2).", formatter_class=argparse.RawTextHelpFormatter,
+    parser = argparse.ArgumentParser(description="Dendrochronology toolkit (V9.8).", formatter_class=argparse.RawTextHelpFormatter,
         epilog=textwrap.dedent("""
         WORKFLOW:
-          1. python gogo.py index     (Downloads standard files and creates the index. Run once.)
-          2. python gogo.py build     (Build master chronologies from the index)
-          3. python gogo.py date ...  (Date a sample against a master)
+          1. python gogo.py index         (Downloads standard files and creates the index. Run once.)
+          2. python gogo.py violin-setup  (Fetch curated violin files and build the specialist master.)
+          3. python gogo.py build         (Build other master chronologies from the index)
+          4. python gogo.py date ...      (Date a sample against a master)
         """))
     subparsers = parser.add_subparsers(dest='command', required=True)
     subparsers.add_parser('index', help="Download standard-format NOAA files and create the data index.")
+    subparsers.add_parser('violin-setup', help="Fetch curated violin files and build the specialist master.")
     
     parser_build = subparsers.add_parser('build', help="Build master chronologies from the clean data index.")
     parser_build.add_argument('--target', choices=['alpine', 'baltic', 'all'], default='all', help="Which master to build. (Default: all)")
@@ -555,7 +613,7 @@ def main():
 
     parser_detective = subparsers.add_parser('detective', help="Run a sample against ALL individual files in a category or folder.")
     parser_detective.add_argument('sample_file', help="Path to your sample .rwl file.")
-    parser_detective.add_argument('target', nargs='?', default='alpine', help="Reference: a category ('alpine', 'baltic', 'all') or a folder path. (Default: alpine)")
+    parser_detective.add_argument('target', nargs='?', default='violin', help="Reference: a category ('alpine', 'baltic', 'violin', 'all') or a folder path. (Default: violin)")
     parser_detective.add_argument('--top_n', type=int, default=10, help="Number of top results to display. (Default: 10)")
     parser_detective.add_argument('--min_overlap', type=int, default=80, help="Minimum overlap in years to consider a match. (Default: 80)")
     parser_detective.add_argument('--min_end_year', type=int, default=1500, help="Only include reference sites that end after this year. Default: 1500")
@@ -565,6 +623,8 @@ def main():
     try:
         if args.command == 'index':
             download_and_index_files()
+        elif args.command == 'violin-setup':
+            fetch_and_build_violin_master()
         elif args.command == 'build':
             min_end_year = args.min_end_year
             if args.target in ['alpine', 'all']:
