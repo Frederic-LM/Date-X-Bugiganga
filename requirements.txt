@@ -1,0 +1,30 @@
+      
+# requirements.txt
+#
+# This file lists the Python packages required to run the dendrochronology
+# scripts (`gogo.py` and `date-x.py`).
+#
+# To install these requirements, it's highly recommended to use a virtual environment:
+#
+# 1. Create a virtual environment (if you don't have one):
+#    python -m venv venv_name
+#
+# 2. Activate the virtual environment:
+#    - On Windows: .\venv_name\Scripts\activate
+#    - On macOS/Linux: source venv_name/bin/activate
+#
+# 3. Install the packages:
+#    pip install -r requirements.txt
+#
+# Versioning:
+# Using 'package>=X.Y.Z' means "install version X.Y.Z or newer".
+# These are common stable versions known to work well with the features used in the scripts.
+# If you encounter issues, you can try specific versions found from 'pip freeze' on a working setup.
+
+pandas>=1.4.0
+numpy>=1.23.0
+scipy>=1.9.0
+matplotlib>=3.5.0
+tqdm>=4.60.0
+
+    
