@@ -1,4 +1,4 @@
-# date-x.py (Version 9.8 - Integrated Violin Setup)
+# date-x.py (Version 9.9 - Integrated Violin Setup)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -10,7 +10,7 @@ try:
         download_and_index_files, build_master_from_index, run_create_master,
         run_date_analysis, run_detective_analysis, plot_results,
         run_two_piece_mean_analysis, parse_as_floating_series,
-        fetch_and_build_violin_master
+        fetch_and_build_violin_master, _classify_dendro_match as _gogo_classify
     )
 except ImportError as e:
     messagebox.showerror("Import Error", f"Could not import from gogo.py. Please ensure it is in the same directory and contains no syntax errors.\n\nDetails: {e}")
@@ -51,6 +51,7 @@ class App(tk.Tk):
         self.load_settings()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.check_plot_queue()
+        self._check_setup_requirements()
         print("Welcome! Ready for analysis.")
 
     def _get_stiffness_from_string(self, value_str):
@@ -114,6 +115,14 @@ class App(tk.Tk):
             final_args = ["placeholder", target, top_n, min_overlap, min_end_year, False, stiffness_pct]
             self._run_in_thread(run_two_piece_mean_analysis, (bass, treble, run_detective_analysis, final_args, reverse_bass, reverse_treble, stiffness_pct), run_button, is_analysis=True)
             
+    def _check_setup_requirements(self):
+        if not os.path.exists("full_rwl_cache"):
+            self.notebook.select(3)
+            print("\n⚠️  SETUP REQUIRED: The RWL cache hasn't been downloaded yet.")
+            print("Please click 'Download and Create Index' in the Setup tab to begin.")
+            print("This step may take 30-45 minutes on first run.")
+            messagebox.showinfo("Initial Setup", "Welcome! Before you can run analysis, you need to download the RWL reference files.\n\nClick 'Download and Create Index' in the Setup tab.\nThis may take 30-45 minutes on first run.")
+
     def on_closing(self):
         print("Saving settings..."); self.save_settings(); self.destroy()
     def save_settings(self):
@@ -417,15 +426,8 @@ class App(tk.Tk):
         self._run_in_thread(fetch_and_build_violin_master, (), self.violin_button)
     
     def _classify_dendro_match(self, t_value, overlap_years, gleich_percent):
-        """Classify match strength based on multi-dimensional thresholds."""
-        if t_value >= 7.0 and overlap_years >= 80 and gleich_percent >= 70:
-            return "Very Strong Match"
-        elif t_value >= 6.0 and overlap_years >= 70 and gleich_percent >= 65:
-            return "Strong Match"
-        elif t_value >= 5.0 and overlap_years >= 50 and gleich_percent >= 60:
-            return "Significant Match"
-        else:
-            return "Tentative/Insufficient Match"
+        """Classify match strength. Single source of truth lives in gogo.py."""
+        return _gogo_classify(t_value, overlap_years, gleich_percent)
 
     def _create_report_content(self):
         """Generates the full report string based on the last analysis."""
@@ -461,7 +463,16 @@ class App(tk.Tk):
             end_year = int(best_match.get('end_year', 0))
 
             if classification != "Tentative/Insufficient Match":
-                dating_result = f"Dendrochronological analysis indicates a felling date for the tree after the growing season of {end_year}. This conclusion is supported by a '{classification}' classification based on the multi-dimensional criteria (T-value: {t_value:.2f}, Overlap: {overlap} yrs, GLK: {glk:.1f}%)."
+                dating_result = (
+                    f"The youngest measured ring dates to {end_year}. This is a terminus post quem: "
+                    f"the tree was felled in {end_year} or later. Unlike oak, the spruce and fir used for "
+                    f"instrument tops have no colour-distinct sapwood, and a finished top rarely preserves the "
+                    f"bark/waney edge, so an unknown number of outer rings has usually been removed. The true "
+                    f"felling date therefore lies at or after {end_year} by an amount that cannot be estimated "
+                    f"from the wood alone; any construction date is later still, after seasoning.\n\n"
+                    f"This conclusion is supported by a '{classification}' classification based on the "
+                    f"multi-dimensional criteria (T-value: {t_value:.2f}, Overlap: {overlap} yrs, GLK: {glk:.1f}%)."
+                )
             else:
                 dating_result = f"Analysis suggests a potential end year of {end_year} (T-value: {t_value:.2f}, Overlap: {overlap} yrs, GLK: {glk:.1f}%). However, this is classified as a 'Tentative/Insufficient Match' because it fails to meet the required thresholds for a conclusive scientific date. This result should be considered a proposal requiring further evidence."
             paragraphs.append(dating_result)
@@ -492,7 +503,7 @@ class App(tk.Tk):
                 
                 if top_location != 'N/A' and top_location:
                     if top_classification != "Tentative/Insufficient Match":
-                        geo_conclusion = f"The strongest alignment is classified as a '{top_classification}' with a chronology from {top_location}. This strongly suggests a probable geographic origin for the instrument's wood in or around this region."
+                        geo_conclusion = f"The strongest alignment is classified as a '{top_classification}' with the reference site '{top_location}' (location read from the file header, which is often approximate). This identifies the best-matching chronology in the tested set; it is consistent with, but does not by itself prove, a wood origin in that region."
                     else:
                         geo_conclusion = f"The top alignment in the database is with a site from {top_location}. However, this is classified as a 'Tentative/Insufficient Match' and cannot be used to confidently assign a geographic origin."
                     paragraphs.append(geo_conclusion)
