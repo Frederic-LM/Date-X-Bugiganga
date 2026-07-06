@@ -1,13 +1,15 @@
-# gogo.py (Version 9.8 - Integrated Violin Setup)
+# gogo.py (Version 9.9 - Integrated Violin Setup)
 # ==============================================================================
 import os, ftplib, argparse, textwrap, multiprocessing, shutil, re
 import warnings
+import urllib.request
 from typing import Tuple, Dict
 import pandas as pd, numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
-from scipy.interpolate import UnivariateSpline
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 
 warnings.filterwarnings("ignore", message="The maximal number of iterations")
 
@@ -91,7 +93,7 @@ def _generate_plot_report_text(analysis_dict: Dict) -> str:
             top_location = top_match.get('location', 'N/A').strip()
             
             if top_location != 'N/A' and top_location and top_classification != "Tentative/Insufficient Match":
-                geo_conclusion = f"\nThe strongest match is a '{top_classification}' with a chronology from {top_location}, suggesting a probable geographic origin."
+                geo_conclusion = f"\nThe strongest match is a '{top_classification}' with the reference site '{top_location}' (as read from the file header, which may be approximate). This indicates the best-matching chronology in the tested set rather than a proven wood origin."
                 report_lines.append(textwrap.fill(geo_conclusion, width=width))
 
     return "\n".join(report_lines)
@@ -159,18 +161,38 @@ def _build_master_from_rwl_file(file_path: str) -> pd.Series:
     df = pd.DataFrame(all_rings).drop_duplicates(subset='year').set_index('year')
     return df['width'].dropna().sort_index()
 
+def _whittaker_smooth(y: np.ndarray, lam: float) -> np.ndarray:
+    """Order-2 Whittaker-Henderson smoother. For equally spaced points this is the
+    discrete cubic smoothing spline, so it lets us set a real frequency response."""
+    n = len(y)
+    if n < 3: return y.astype(float)
+    D = sparse.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n))
+    A = sparse.eye(n, format='csc') + lam * (D.T @ D)
+    return spsolve(A.tocsc(), y.astype(float))
+
 def detrend(series: pd.Series, spline_stiffness_pct: int = 67) -> Tuple[pd.Series, pd.Series]:
+    """Cook & Peters (1981) cubic smoothing spline detrending.
+
+    The spline has a 50% frequency response at a wavelength of `nyrs`, where
+    nyrs = (spline_stiffness_pct %) of the series length. A larger percentage
+    means a longer cutoff wavelength, i.e. a stiffer (flatter) growth curve that
+    removes only very-low-frequency age trend. Implemented via the order-2
+    Whittaker-Henderson smoother, which is the equally-spaced cubic smoothing
+    spline, so the same stiffness is applied identically to every series."""
     series = series.dropna()
     if len(series) < 15: return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
-    x, y = series.index.values, series.values
-    s = len(series) * (spline_stiffness_pct / 100)**3
-    spline = UnivariateSpline(x, y, s=s)
-    spline_fit = pd.Series(spline(x), index=x)
-    detrended_series = series / (spline_fit + 1e-6)
+    y = series.values.astype(float)
+    nyrs = max(4.0, (spline_stiffness_pct / 100.0) * len(series))
+    # 50% amplitude of the order-2 smoother's transfer function at f0 = 1/nyrs.
+    lam = 1.0 / (16.0 * np.sin(np.pi / nyrs) ** 4)
+    fit = np.clip(_whittaker_smooth(y, lam), 1e-6, None)
+    spline_fit = pd.Series(fit, index=series.index)
+    detrended_series = series / spline_fit
     return detrended_series, spline_fit
 
 def calculate_t_value(r: float, n: int) -> float:
-    if n < 3 or abs(r) >= 1.0: return np.inf * np.sign(r) if r != 0 else 0
+    if n < 3: return 0.0
+    if abs(r) >= 1.0: return float(np.sign(r) * 999.0)  # cap instead of inf (keeps idxmax/JSON sane)
     return r * np.sqrt((n - 2) / (1 - r**2))
 
 def calculate_glk(series1: pd.Series, series2: pd.Series) -> float:
@@ -205,7 +227,20 @@ def cross_date(sample_series: pd.Series, master_series: pd.Series, min_overlap: 
     if not corrs: return {"error": f"No suitable overlap found (min_overlap = {min_overlap} years)."}
     rdf = pd.DataFrame(corrs)
     if rdf['t_value'].isnull().all(): return {"error": "Correlation calculation failed for all overlaps."}
-    return {"best_match": rdf.loc[rdf['t_value'].idxmax()].to_dict(), "all_correlations": rdf.set_index('end_year')}
+    best_match = rdf.loc[rdf['t_value'].idxmax()].to_dict()
+    # Multiple-testing safeguard: a genuine date should stand out from the crowd of
+    # candidate offsets, not just clear an absolute t threshold. Report how many
+    # standard deviations the winner sits above the population of all tested offsets,
+    # and the gap to the runner-up. (Baillie & Pilcher 1973 emphasised this "standing out".)
+    t_pop = rdf['t_value'].replace([np.inf, -np.inf], np.nan).dropna()
+    best_t = best_match.get('t_value', 0.0)
+    if len(t_pop) > 2 and t_pop.std(ddof=0) > 1e-9:
+        best_match['t_zscore'] = float((best_t - t_pop.mean()) / t_pop.std(ddof=0))
+    else:
+        best_match['t_zscore'] = 0.0
+    others = t_pop[t_pop < best_t]
+    best_match['second_best_t'] = float(others.max()) if not others.empty else 0.0
+    return {"best_match": best_match, "all_correlations": rdf.set_index('end_year')}
 
 def plot_results(analysis_dict: Dict):
     print("Generating enhanced diagnostic plot...")
@@ -228,6 +263,7 @@ def plot_results(analysis_dict: Dict):
     all_correlations = results['all_correlations']
     best_end_year = int(best_match['end_year'])
     r_val, t_val, n_val, glk_val = best_match['correlation'], best_match['t_value'], int(best_match['overlap_n']), best_match.get('glk', 0.0)
+    z_val, second_t = best_match.get('t_zscore', 0.0), best_match.get('second_best_t', 0.0)
     best_start_year = best_end_year - (raw_sample.index.max() - raw_sample.index.min())
     
     # Main 2x2 GridSpec with manual spacing for stability
@@ -285,6 +321,7 @@ def plot_results(analysis_dict: Dict):
       Correlation (r): {r_val:.2f}
       GLK (%): {glk_val:.1f}
       Overlap (n): {n_val}
+      Stands out: {z_val:.1f} SD (2nd best t={second_t:.2f})
     """)
     summary_text_full = "Statistical Summary\n" + "-"*25 + "\n" + summary_text_body
     
@@ -362,7 +399,7 @@ def process_single_file(args):
     analysis_results = cross_date(sample_detrended, master_detrended, min_overlap=min_overlap)
     if "error" in analysis_results: return None
     best_match = analysis_results['best_match']
-    if best_match['correlation'] > 0.99: return None
+    if best_match['correlation'] >= 0.9999: return None  # drop a reference that is (near) identical to the sample itself
     best_match['source_file'] = filename
     return best_match
 
@@ -471,29 +508,66 @@ def run_two_piece_mean_analysis(bass_file, treble_file, final_analysis_func, fin
 
 # --- COMMAND LOGIC ---
 
+# NOAA retired the anonymous NCDC FTP host; the paleo tree-ring archive now lives
+# on NCEI over HTTPS. We try FTP first (it may still be reachable) and fall back to
+# HTTPS automatically so setup keeps working either way.
+NOAA_FTP_HOST = "ftp.ncdc.noaa.gov"
+NOAA_FTP_DIR = "/pub/data/paleo/treering/measurements/europe/"
+NOAA_HTTPS_DIR = "https://www.ncei.noaa.gov/pub/data/paleo/treering/measurements/europe/"
+
+def _download_via_ftp(cache_dir, standard_file_pattern):
+    ftp = ftplib.FTP(NOAA_FTP_HOST, timeout=60); ftp.login(); ftp.cwd(NOAA_FTP_DIR)
+    all_server_files = ftp.nlst()
+    files_to_download, skipped = [], []
+    for f in all_server_files:
+        if standard_file_pattern.match(f): files_to_download.append(f)
+        elif f.lower().endswith('.rwl'): skipped.append(f)
+    print(f"Found {len(all_server_files)} files on the FTP server.")
+    print(f"-> {len(files_to_download)} match the standard format and will be downloaded.")
+    if skipped: print(f"-> {len(skipped)} non-standard .rwl files will be skipped.")
+    for filename in tqdm(files_to_download, desc="Downloading (FTP)"):
+        local_path = os.path.join(cache_dir, filename)
+        if not os.path.exists(local_path):
+            try:
+                with open(local_path, 'wb') as fh: ftp.retrbinary(f"RETR {filename}", fh.write)
+            except Exception as e: print(f"Warning: Failed to download {filename}: {e}"); continue
+    ftp.quit()
+    return files_to_download
+
+def _download_via_https(cache_dir, standard_file_pattern):
+    print(f"Falling back to HTTPS: {NOAA_HTTPS_DIR}")
+    req = urllib.request.Request(NOAA_HTTPS_DIR, headers={"User-Agent": "gogo-dendro/1.0"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        html = resp.read().decode("utf-8", "ignore")
+    # Directory listing hrefs are bare filenames like 'germ12.rwl'.
+    all_server_files = sorted(set(re.findall(r'href="([^"/?]+\.rwl)"', html, flags=re.IGNORECASE)))
+    files_to_download = [f for f in all_server_files if standard_file_pattern.match(f)]
+    print(f"Found {len(all_server_files)} .rwl files listed; {len(files_to_download)} match the standard format.")
+    if not files_to_download:
+        raise ConnectionError("HTTPS listing returned no standard .rwl files (page format may have changed).")
+    for filename in tqdm(files_to_download, desc="Downloading (HTTPS)"):
+        local_path = os.path.join(cache_dir, filename)
+        if not os.path.exists(local_path):
+            try:
+                fr = urllib.request.Request(NOAA_HTTPS_DIR + filename, headers={"User-Agent": "gogo-dendro/1.0"})
+                with urllib.request.urlopen(fr, timeout=60) as r, open(local_path, 'wb') as fh:
+                    shutil.copyfileobj(r, fh)
+            except Exception as e: print(f"Warning: Failed to download {filename}: {e}"); continue
+    return files_to_download
+
 def download_and_index_files(index_filename="noaa_europe_index.csv"):
     print("--- Stage 1: Downloading standard .rwl files and creating index ---")
     cache_dir = "full_rwl_cache"
     os.makedirs(cache_dir, exist_ok=True)
     standard_file_pattern = re.compile(r"^[a-zA-Z]+[0-9]+\.rwl$")
     try:
-        ftp = ftplib.FTP("ftp.ncdc.noaa.gov", timeout=60); ftp.login(); ftp.cwd("/pub/data/paleo/treering/measurements/europe/")
-        all_server_files = ftp.nlst()
-    except Exception as e: raise ConnectionError(f"FTP Error: {e}")
-    files_to_download = []; skipped_files = []
-    for f in all_server_files:
-        if standard_file_pattern.match(f): files_to_download.append(f)
-        elif f.lower().endswith('.rwl'): skipped_files.append(f)
-    print(f"Found {len(all_server_files)} total files on server.")
-    print(f"-> {len(files_to_download)} files match standard format and will be downloaded.")
-    if skipped_files: print(f"-> {len(skipped_files)} non-standard .rwl files will be skipped (e.g., 'e', 'l', etc.).")
-    for filename in tqdm(files_to_download, desc="Downloading Standard Files"):
-        local_path = os.path.join(cache_dir, filename)
-        if not os.path.exists(local_path):
-            try:
-                with open(local_path, 'wb') as f: ftp.retrbinary(f"RETR {filename}", f.write)
-            except Exception as e: print(f"Warning: Failed to download {filename}: {e}"); continue
-    ftp.quit()
+        files_to_download = _download_via_ftp(cache_dir, standard_file_pattern)
+    except Exception as e:
+        print(f"FTP download unavailable ({e}).")
+        try:
+            files_to_download = _download_via_https(cache_dir, standard_file_pattern)
+        except Exception as e2:
+            raise ConnectionError(f"Both FTP and HTTPS downloads failed. FTP: {e} | HTTPS: {e2}")
     print("Download complete.")
     print("\n--- Indexing downloaded files ---")
     all_metadata = []
@@ -522,8 +596,14 @@ def build_master_from_index(chronology_name, target_species, country_prefixes, m
     all_series = [s for s in all_series if not s.empty]
     if not all_series: raise ValueError("Failed to process any files.")
     combined_df = pd.concat(all_series, axis=1)
-    master_chronology = combined_df.mean(axis=1); series_count = combined_df.notna().sum(axis=1)
-    master_chronology = master_chronology[series_count >= 5].dropna()
+
+    # NEW: Normalize each tree series by its own mean before averaging.
+    # This prevents fast-growing trees from dominating the master chronology.
+    normalized_df = combined_df.div(combined_df.mean(axis=0), axis=1)
+
+    master_chronology = normalized_df.mean(axis=1)
+    series_count = normalized_df.notna().sum(axis=1)
+    master_chronology = master_chronology[series_count >= 10].dropna()
     output_filename = f"master_{chronology_name.lower().replace(' ', '_')}.csv"; master_chronology.to_csv(output_filename, header=['value'], index_label='year')
     print(f"--- SUCCESS! Saved to '{output_filename}' ---")
 
@@ -538,8 +618,14 @@ def run_create_master(input_folder, output_filename):
     if not all_series: raise ValueError("Failed to process any .rwl files.")
     print(f"Combining {len(all_series)} series...")
     combined_df = pd.concat(all_series, axis=1)
-    master_chronology = combined_df.mean(axis=1); series_count = combined_df.notna().sum(axis=1)
-    master_chronology = master_chronology[series_count >= 2].dropna()
+
+    # NEW: Normalize each tree series by its own mean before averaging.
+    # This prevents fast-growing trees from dominating the master chronology.
+    normalized_df = combined_df.div(combined_df.mean(axis=0), axis=1)
+
+    master_chronology = normalized_df.mean(axis=1)
+    series_count = normalized_df.notna().sum(axis=1)
+    master_chronology = master_chronology[series_count >= 3].dropna()
     if not master_chronology.empty:
         if not output_filename.lower().endswith('.csv'): output_filename += ".csv"
         master_chronology.to_csv(output_filename, header=['value'], index_label='year')
