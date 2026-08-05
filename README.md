@@ -393,28 +393,45 @@ brew install python-tk
 
 ### Statistical Methods
 
-**Detrending**: Cubic Smoothing Spline with 67% cutoff frequency (Cook & Peters, 1981)
+**Detrending**: Cubic Smoothing Spline, 67% cutoff frequency, configurable stiffness (Cook & Peters, 1981). Applied identically to sample and master. **Autocorrelation is not removed** — series are standard-index, not residual.
 
 **Cross-Dating Validation**:
-- **T-Value**: Student's t-test for correlation significance
-- **Overlap (n)**: Number of overlapping years
-- **Gleichläufigkeit (GLK)**: Sign-test for year-to-year changes
+- **T-Value**: Student's *t* from the Pearson correlation of the two detrended series, df = overlap − 2
+- **Overlap (n)**: Number of overlapping years — required to interpret the T-Value
+- **Gleichläufigkeit (GLK)**: Sign-test for year-to-year changes (Eckstein & Bauch, 1969)
+
+> ⚠️ **The T-Value is not a probability.** T-values of this family do not follow Student's *t*-distribution, because consecutive rings are autocorrelated and degrees of freedom are overstated (Baillie, 1982). Significance for oak had to be established empirically rather than theoretically (Fowler & Bridge, 2017). Read it as an index of similarity, not as odds.
+
+**Converting to shared variation**: `r² = t² / (t² + n − 2)` — exact, and dependent on overlap as well as T. The same T-Value describes a weaker relationship on a longer series.
 
 ### Classification Thresholds
 
-| Classification | T-Value | Overlap | GLK | Interpretation |
-|----------------|---------|---------|-----|----------------|
-| **Very Strong** | >6.0 | >80 | >65% | Highly reliable match |
-| **Strong** | >4.0 | >60 | >60% | Reliable match |
-| **Significant** | >3.0 | >40 | >55% | Likely correct match |
-| **Weak** | >2.0 | >30 | >50% | Possible match, verify |
-| **No Match** | <2.0 | - | - | No significant correlation |
+Thresholds are **conventions, not derived constants**, and published practice varies. All values below are configurable.
+
+| Classification | T-Value | Overlap | GLK | Shared var.* | Reading |
+|----------------|---------|---------|-----|--------------|---------|
+| **Very Strong** | >6.0 | >80 | >65% | ~32% | Strong dating candidate — check competing alignments |
+| **Strong** | >4.0 | >60 | >60% | ~22% | Plausible — needs corroboration |
+| **Significant** | >3.0 | >40 | >55% | ~19% | Weak — meaningful only with independent support |
+| **Weak** | >2.0 | >30 | >50% | ~13% | Not evidential — listed for completeness |
+| **No Match** | <2.0 | – | – | – | No detectable correspondence |
+
+<sub>* at each tier's minimum overlap</sub>
+
+**Reading the table:**
+- These describe correspondence between **ring sequences**. They say nothing about maker, workshop or region.
+- Short overlaps flatter the statistic — below ~50 rings, treat every tier as one step weaker.
+- No tier is interpretable without the alignment count. See the `SEARCH CONTEXT` block in generated reports.
+- Visual comparison of growth curves remains necessary. This software does not perform it.
 
 ### Key References
 
-1. **Cook, E.R. & Peters, K. (1981)** *The smoothing spline: a new approach to standardizing forest interior tree-ring width*
-2. **Baillie, M.G.L. & Pilcher, J.R. (1973)** *A simple crossdating program for tree-ring research*
-3. **Eckstein, D. & Bauch, J. (1969)** *Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens*
+**Methods implemented**
+1. **Cook, E.R. & Peters, K. (1981)** — The smoothing spline: a new approach to standardizing forest interior tree-ring width series. *Tree-Ring Bulletin* 41, 45–53.
+2. **Baillie, M.G.L. & Pilcher, J.R. (1973)** — A simple cross-dating program for tree-ring research. *Tree-Ring Bulletin* 33, 7–14.
+3. **Eckstein, D. & Bauch, J. (1969)** — Beitrag zur Rationalisierung eines dendrochronologischen Verfahrens. *Forstwissenschaftliches Centralblatt* 88, 230–250.
+
+
 
 ---
 
