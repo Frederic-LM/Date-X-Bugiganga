@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 
-**Professional-grade dendrochronology toolkit for scientific cross-dating of tree-ring measurement series**
+**An open-source dendrochronology toolkit for cross-dating tree-ring measurement series**
 
 [Quick Start](#-quick-start) • [Features](#-core-features) • [GUI Guide](#-gui-guide) • [CLI Reference](#-cli-reference) • [Examples](#-examples)
 
@@ -19,13 +19,13 @@
 
 ## 🎯 What is Date-X Bugiganga?
 
-**Date-X Bugiganga** is a comprehensive dendrochronology toolkit that combines cutting-edge statistical methods with user-friendly interfaces to provide tree-ring dating, it features:
+**Date-X Bugiganga** cross-dates tree-ring series against reference chronologies and reports the result with the information needed to judge it. It features:
 
-- 🔬 **Scientific Rigor**: Multi-dimensional validation using T-Value, Overlap, and Gleichläufigkeit
-- 🚀 **Modern Methods**: Cubic Smoothing Spline detrending 
+- 🔬 **Stated statistics**: T-Value always reported with its overlap, plus Gleichläufigkeit
+- 🚀 **Detrending**: Cubic smoothing spline, parameters stated in every report 
 - 🎨 **Dual Interface**: Choose between intuitive GUI or powerful CLI
 - 📊 **Rich Visualizations**: Comprehensive 2x2 plots with narrative interpretations
-- 🌍 **Global Database**: Integrated NOAA reference database access
+- 🌍 **Public reference data**: Integrated NOAA/ITRDB access — forest chronologies, not a private corpus
 - ⚡ **Batch Processing**: Handle hundreds of samples efficiently
 
 ---
@@ -36,8 +36,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/date-x-bugiganga.git
-cd date-x-bugiganga
+git clone https://github.com/Frederic-LM/Date-XBugiganga.git
+cd Date-XBugiganga
 
 # Install dependencies
 pip install pandas numpy matplotlib scipy tqdm
@@ -58,14 +58,15 @@ python Date-X.py
 ## ✨ Core Features
 
 ### 🔬 Advanced Science
-- **Modern Detrending**: Cubic Smoothing Spline removes biological age trends with superior flexibility
-- **Multi-Dimensional Validation**: Prevents false positives through comprehensive statistical analysis
+- **Detrending**: Cubic smoothing spline removes the biological age trend; stiffness is configurable and recorded
+- **Overlap reported throughout**: no T-Value is printed without the *n* it was computed over
+- **Search context**: reports state how many alignments were tested and how many survived each threshold
 - **Two-Piece Analysis**: Specialized mode for matching and merging separate measurement series
 
 ### 🎯 Powerful Analysis Tools
 - **Interactive GUI**: Point-and-click interface for single sample analysis
 - **Scriptable CLI**: Batch processing and automation capabilities
-- **Detective Mode**: Unknown origin samples tested against entire database
+- **Survey Mode**: rank which references a series correlates with, across a whole collection
 - **Custom Masters**: Build chronologies from your own reference collections
 
 ### 📊 Rich Output
@@ -79,7 +80,7 @@ python Date-X.py
 
 | Component | Requirement |
 |-----------|-------------|
-| **Python** | 3.7+ (3.9+ recommended) |
+| **Python** | 3.9+ |
 | **OS** | Windows 10+, macOS 10.14+, Linux (Ubuntu 18.04+) |
 | **RAM** | 4GB minimum, 8GB recommended |
 | **CPU** | Multicore for // Processing |
@@ -95,9 +96,9 @@ python Date-X.py
 ## 📋 Table of Contents
 
 ### Getting Started
-- [Installation & Setup](#installation-and-setup)
-- [Quick Start Guide](#quick-start-guide)
-- [System Requirements](#system-requirements)
+- [Quick Start](#-quick-start)
+- [Core Features](#-core-features)
+- [System Requirements](#️-system-requirements)
 
 ### User Guides
 - [🖼️ GUI Guide (`Date-X.py`)](#-gui-guide)
@@ -127,17 +128,17 @@ python Date-X.py
 └─────────────┬────────────────┘
               │
          ┌────▼────┐
-         │ Sample  │
-         │ Origin  │
-         │ Known?  │
+         │Reference│
+         │ chosen  │
+         │   ?     │
          └────┬────┘
               │
     ┌─────────┼─────────┐
     │ Yes     │      No │
     ▼         ▼         ▼
 ┌───────┐ ┌───────────────────┐
-│  Date │ │ 🕵️ Detective Mode │
-│Against│ │ Test All Sites    │
+│  Date │ │ 🕵️ Survey Mode    │
+│Against│ │ Rank All Refs     │
 │Master │ └─────────┬─────────┘
 └───┬───┘           │
     └───────┬───────┘
@@ -163,12 +164,13 @@ python Date-X.py
    - Average multiple series to amplify climate signals
 
 3. **🎯 Analyze Your Sample**
-   - **Known origin**: Test against specific master chronology
-   - **Unknown origin**: Use Detective mode for geographic identification
+   - **Reference chosen**: test against a specific master chronology
+   - **No reference chosen**: use Survey mode to rank correlations across a collection
 
 4. **📊 Interpret Results**
    - Review comprehensive visual plots
-   - Check statistical classification (Very Strong, Significant, etc.)
+   - Check statistical classification (Very Strong, Significant, etc.) against the overlap it was computed over
+   - Read the alignment count before reading the top result
    - Generate shareable reports
 
 ---
@@ -195,13 +197,13 @@ python Date-X.py
 | **Min Overlap** | Required overlap years | 60+ for reliable results |
 | **Stiffness** | Detrending sensitivity | Standard (67%) for most cases |
 
-### Tab 2: 🕵️ Detective
-**Purpose**: Identify unknown sample origins
+### Tab 2: 🕵️ Survey
+**Purpose**: Rank a series against every reference in a collection
 
 - **Predefined Categories**: `alpine`, `baltic`
 - **Custom Folders**: Use your own reference collections
 - **Top N Results**: Display best matches (recommended: 5-10)
-- **High Overlap**: Use 80+ years for detective work
+- **High Overlap**: Use 80+ years — a large search needs a stronger floor
 
 ### Tab 3: 🏗️ Create Master
 **Purpose**: Build custom chronologies from local collections
@@ -259,7 +261,7 @@ python gogo.py date "sample.rwl" "master_alpine.csv" [options]
 --stiffness 0.67       # Detrending stiffness (0.5-0.8)
 ```
 
-#### `detective` - Multi-Master Search
+#### `detective` - Multi-Master Search *(Survey mode)*
 ```bash
 # Search predefined category
 python gogo.py detective "sample.rwl" alpine --top_n 5
@@ -285,12 +287,13 @@ python Date-X.py
 # Choose alpine master, check "Reverse" if needed
 ```
 
-### Example 2: Unknown Origin Investigation
+### Example 2: Surveying a Whole Collection
 ```bash
-# CLI approach for unknown sample
+# CLI approach when no single reference has been chosen
 python gogo.py detective "mystery_sample.rwl" alpine --top_n 10 --min_overlap 80
 
-# Expected output: Ranked list of best matches with statistics
+# Output: ranked correlations with overlap and alignment count.
+# A ranking is not an origin — see Methods & References below.
 ```
 
 ### Example 3: Building Custom Regional Master
@@ -385,7 +388,7 @@ brew install python-tk
 - 📖 Check the [Methods & References](#-methods--references) tab in GUI
 - 🐛 Report bugs via GitHub Issues
 - 💡 Feature requests welcome
-- 📧 Contact: your.email@domain.com
+- 📧 Contact: via GitHub Issues
 
 ---
 
@@ -424,6 +427,8 @@ Thresholds are **conventions, not derived constants**, and published practice va
 - No tier is interpretable without the alignment count. See the `SEARCH CONTEXT` block in generated reports.
 - Visual comparison of growth curves remains necessary. This software does not perform it.
 
+> ⚠️ **On origin.** A high correlation with a reference from a given region does not place the wood there. The signal that makes cross-dating work is the shared regional climate signal, which is by construction similar across a whole region; the site-specific component that would carry origin is small and confounded with individual-tree variation. Survey mode ranks *correlations with references*, which is a different thing from provenance. Establishing origin requires purpose-built local or elevation-specific chronologies and usually a second line of evidence.
+
 ### Key References
 
 **Methods implemented**
@@ -437,7 +442,7 @@ Thresholds are **conventions, not derived constants**, and published practice va
 
 ## 🤝 Contributing
 
-We welcome contributions to improve Date-X Bugiganga! Here's how you can help:
+Contributions are welcome. Here's how you can help:
 
 ### 🐛 Bug Reports
 - Use GitHub Issues with detailed descriptions
