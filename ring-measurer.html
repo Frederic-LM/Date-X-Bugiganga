@@ -1,0 +1,2001 @@
+<!DOCTYPE html>
+<!-- Pennyscope (Version 10.2) - browser front end for gogo.py.
+     The version shown in the status bar is fetched from /api/status, which reports
+     gogo.__version__; do not hardcode a version string in this file. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pennyscope</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #18181b;
+      --sf:      #27272a;
+      --sf2:     #3f3f46;
+      --acc:     #3a6b47;
+      --acc2:    #74b887;
+      --txt:     #f4f4f5;
+      --dim:     #a1a1aa;
+      --bdr:     #3f3f46;
+      --red:     #ef4444;
+      --grn:     #22c55e;
+      --ylw:     #fbbf24;
+      --cyn:     #22d3ee;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--txt);
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Toolbar ─────────────────────────────────────────── */
+    #tb {
+      background: var(--sf); border-bottom: 1px solid var(--bdr);
+      padding: 5px 10px; display: flex; align-items: center; gap: 5px;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .ttl  { font-weight: 700; font-size: 14px; color: var(--acc2); margin-right: 6px; }
+    .sep  { width: 1px; height: 26px; background: var(--bdr); margin: 0 3px; flex-shrink: 0; }
+    .tbtn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 9px; border: 1px solid var(--bdr); border-radius: 5px;
+      background: var(--sf2); color: var(--txt); cursor: pointer;
+      font-size: 12px; white-space: nowrap; transition: background .12s, border-color .12s;
+    }
+    .tbtn:hover         { background: var(--acc); border-color: var(--acc); }
+    .tbtn.active        { background: var(--acc); border-color: var(--acc2); }
+    .tbtn.danger:hover  { background: var(--red); border-color: var(--red); }
+    .tbtn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+    /* Piece badge in toolbar */
+    #piece-badge {
+      padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+      background: rgba(251,191,36,.18); color: var(--ylw);
+      border: 1px solid rgba(251,191,36,.3); display: none;
+    }
+    #piece-badge.treble { background: rgba(34,211,238,.18); color: var(--cyn); border-color: rgba(34,211,238,.3); }
+
+    /* ── Main ────────────────────────────────────────────── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Canvas ──────────────────────────────────────────── */
+    #cw {
+      flex: 1; position: relative; overflow: hidden; background: #0d0d0d;
+    }
+    #cw.tool-pan         { cursor: grab; }
+    #cw.tool-pan.drag    { cursor: grabbing; }
+    #cw.tool-calibrate,
+    #cw.tool-axis,
+    #cw.tool-rings       { cursor: crosshair; }
+
+    #cv { display: block; position: absolute; top: 0; left: 0; }
+
+    #drop-msg {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px;
+      color: var(--dim); pointer-events: none;
+    }
+    #drop-msg svg { width: 56px; height: 56px; opacity: .25; }
+    #drop-msg .h1 { font-size: 16px; opacity: .4; }
+    #drop-msg .h2 { font-size: 12px; opacity: .25; }
+
+    #zoom-lbl {
+      position: absolute; bottom: 10px; left: 10px;
+      background: rgba(0,0,0,.65); border-radius: 4px;
+      padding: 2px 8px; font-size: 11px; color: #888; pointer-events: none;
+    }
+    #hint-bar {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.78); border: 1px solid var(--bdr);
+      border-radius: 5px; padding: 4px 14px; font-size: 11px; color: #ccc;
+      pointer-events: none; white-space: nowrap;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────── */
+    /* The sidebar scrolls as a whole. It used to be overflow:hidden with every panel
+       flex-shrink:0, so on a short window the panels above simply pushed the lower ones
+       out of the column with no way to reach them. */
+    #sb {
+      width: 275px; background: var(--sf); border-left: 1px solid var(--bdr);
+      display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
+      flex-shrink: 0;
+    }
+    .panel { padding: 9px 11px; border-bottom: 1px solid var(--bdr); flex-shrink: 0; }
+    .ptit  {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--dim); margin-bottom: 7px;
+    }
+
+    /* Collapsible panels: click the title to fold one away. */
+    .collapsible > .ptit {
+      cursor: pointer; user-select: none; display: flex; align-items: center; gap: 5px;
+    }
+    .collapsible > .ptit:hover { filter: brightness(1.35); }
+    .chev { display: inline-block; transition: transform .15s; font-size: 9px; }
+    .panel.collapsed > .pbody { display: none; }
+    .panel.collapsed > .ptit  { margin-bottom: 0; }
+    .panel.collapsed .chev    { transform: rotate(-90deg); }
+    .row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; font-size: 12px; }
+    .row label { flex: 1; color: var(--dim); }
+    .row input, .row select {
+      width: 118px; background: var(--sf2); border: 1px solid var(--bdr);
+      border-radius: 4px; color: var(--txt); padding: 3px 6px; font-size: 12px;
+    }
+    .row input:focus, .row select:focus { outline: 1px solid var(--acc); border-color: var(--acc); }
+
+    /* Piece tabs */
+    .ptabs { display: flex; gap: 5px; margin-bottom: 8px; }
+    .ptab  {
+      flex: 1; padding: 5px; border-radius: 5px;
+      border: 1px solid var(--bdr); background: var(--sf2);
+      color: var(--dim); cursor: pointer; font-size: 12px; font-weight: 500;
+      transition: all .12s;
+    }
+    .ptab:hover { border-color: var(--acc); color: var(--txt); }
+    .ptab.bass-active   { background: rgba(251,191,36,.18); color: var(--ylw); border-color: rgba(251,191,36,.4); }
+    .ptab.treble-active { background: rgba(34,211,238,.18); color: var(--cyn); border-color: rgba(34,211,238,.4); }
+
+    /* Status dots */
+    .stat { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); margin-bottom: 3px; }
+    .dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+    .dot.ok    { background: var(--grn); }
+    .dot.maybe { background: var(--ylw); }
+
+    /* Measurements. Given a floor so it cannot be squeezed to nothing by the panels
+       above it; anything beyond that scrolls with the sidebar. */
+    #meas { flex: 1 0 auto; min-height: 170px; display: flex; flex-direction: column; }
+    #meas .ptit { padding: 9px 11px 4px; margin: 0; }
+    #no-rings { padding: 18px 10px; color: var(--dim); font-size: 11px; text-align: center; }
+
+    /* Ring-width sparkline */
+    #spark-wrap { padding: 2px 11px 7px; }
+    #spark { width: 100%; height: 46px; display: block; background: #0d0d0d; border-radius: 4px; }
+    #spark-cap { font-size: 10px; color: var(--dim); margin-top: 3px; display: flex; justify-content: space-between; }
+    #spark-cap b { color: var(--acc2); font-weight: 600; }
+    #spark-warn { color: var(--ylw); }
+
+    #rtbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #rtbl th { text-align: left; padding: 3px 9px; color: var(--dim); font-weight: 500; background: var(--sf); }
+    #rtbl td { padding: 3px 9px; border-bottom: 1px solid rgba(255,255,255,.03); font-variant-numeric: tabular-nums; }
+    #rtbl tr:hover td { background: rgba(99,102,241,.1); }
+    #rtbl tr.flag td { background: rgba(251,191,36,.15); color: var(--ylw); }
+    #rtbl tr.flag td:first-child::after { content: ' \26A0'; }
+
+    /* Export */
+    #exp-panel { padding: 9px 11px; border-top: 1px solid var(--bdr); flex-shrink: 0; }
+    #exp-panel .ptit { margin-bottom: 7px; }
+    .xbtns { display: flex; gap: 5px; }
+    .xbtn {
+      flex: 1; padding: 5px 4px; border: 1px solid var(--bdr); border-radius: 4px;
+      background: var(--sf2); color: var(--txt); cursor: pointer;
+      font-size: 11px; text-align: center; transition: background .12s;
+    }
+    .xbtn:hover { background: var(--acc); border-color: var(--acc); }
+
+    /* Dating Analysis panel */
+    #btn-run, #btn-xm {
+      width: 100%; margin-top: 6px; padding: 7px; border: 1px solid var(--bdr);
+      border-radius: 5px; background: var(--sf2); color: var(--txt);
+      cursor: pointer; font-size: 12px; font-weight: 500; transition: background .12s;
+    }
+    #btn-run:hover:not(:disabled), #btn-xm:hover:not(:disabled) { background: var(--acc); border-color: var(--acc); }
+    #btn-run:disabled, #btn-xm:disabled { opacity: .38; cursor: not-allowed; }
+    #btn-run.busy, #btn-xm.busy { background: var(--ylw); color: #000; border-color: var(--ylw); animation: pulse 1s infinite; }
+    #btn-xm { margin-top: 4px; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
+    #xm-row { display: none; }
+
+    /* ── Results modal ───────────────────────────────────── */
+    #res-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,.83);
+      display: none; align-items: flex-start; justify-content: center;
+      z-index: 200; padding: 16px; overflow-y: auto;
+    }
+    #res-bg.show { display: flex; }
+    #res-modal {
+      background: var(--sf); border: 1px solid var(--bdr);
+      border-radius: 10px; width: 100%; max-width: 940px;
+    }
+    #res-hd {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 15px; border-bottom: 1px solid var(--bdr);
+      background: var(--sf2); border-radius: 10px 10px 0 0;
+    }
+    #res-hd h3 { flex: 1; font-size: 13px; }
+    #res-hd button { background: none; border: none; color: var(--dim); font-size: 22px; cursor: pointer; line-height: 1; }
+    #res-hd button:hover { color: var(--txt); }
+
+    /* Internal match bar (two-piece only) */
+    #int-bar {
+      display: none; padding: 8px 15px; border-bottom: 1px solid var(--bdr);
+      background: rgba(0,0,0,.3); font-size: 12px;
+    }
+    #int-bar .irow { display: flex; gap: 20px; align-items: center; }
+    #int-lbl { font-weight: 600; margin-right: 4px; }
+
+    #res-stats { display: flex; gap: 10px; flex-wrap: wrap; padding: 10px 15px; border-bottom: 1px solid var(--bdr); }
+    .rstat { background: var(--sf2); border-radius: 6px; padding: 6px 12px; min-width: 75px; text-align: center; }
+    .rstat .v { font-size: 19px; font-weight: 700; color: var(--acc2); }
+    .rstat .l { font-size: 10px; color: var(--dim); margin-top: 1px; }
+    .rstrength { padding: 6px 13px; border-radius: 6px; font-size: 12px; font-weight: 600; align-self: center; }
+    .sv { background: rgba(34,197,94,.18);  color: #4ade80; }
+    .ss { background: rgba(58,107,71,.25);  color: #74b887; }
+    .sg { background: rgba(251,191,36,.18); color: #fbbf24; }
+    .st { background: rgba(239,68,68,.18);  color: #f87171; }
+    .sn { background: rgba(148,163,184,.18); color: #cbd5e1; }
+
+    #res-plot { width: 100%; display: none; border-bottom: 1px solid var(--bdr); }
+    #res-top  { padding: 10px 15px 6px; border-bottom: 1px solid var(--bdr); display: none; }
+    #res-top .sec { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 6px; }
+    #top-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #top-tbl th { text-align: left; padding: 2px 8px; color: var(--dim); }
+    #top-tbl td { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,.03); font-variant-numeric: tabular-nums; }
+    #top-tbl tr:first-child td { color: var(--acc2); font-weight: 600; }
+    #res-log { padding: 8px 15px 12px; }
+    #res-log details summary { font-size: 11px; color: var(--dim); cursor: pointer; }
+    #res-log pre { font-size: 10px; color: var(--dim); background: #0d0d0d; padding: 8px; border-radius: 4px; margin-top: 6px; max-height: 140px; overflow: auto; white-space: pre-wrap; }
+
+    /* ── Calibration modal ───────────────────────────────── */
+    #cal-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    #cal-bg.show { display: flex; }
+    #cal-modal {
+      background: var(--sf); border: 1px solid var(--bdr);
+      border-radius: 9px; padding: 20px 22px; min-width: 280px;
+    }
+    #cal-modal h3 { font-size: 14px; margin-bottom: 9px; }
+    #cal-modal p  { font-size: 12px; color: var(--dim); margin-bottom: 12px; }
+    #cal-inp {
+      width: 100%; background: var(--sf2); border: 1px solid var(--bdr);
+      border-radius: 5px; color: var(--txt); padding: 7px 10px;
+      font-size: 14px; margin-bottom: 14px;
+    }
+    #cal-inp:focus { outline: 1px solid var(--acc); }
+    .mrow { display: flex; gap: 8px; justify-content: flex-end; }
+    .mbtn { padding: 5px 14px; border-radius: 5px; border: 1px solid var(--bdr); cursor: pointer; font-size: 12px; }
+    .mbtn.ok { background: var(--acc); color: #fff; border-color: var(--acc); }
+    .mbtn.no { background: var(--sf2); color: var(--txt); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--sf); }
+    ::-webkit-scrollbar-thumb { background: var(--sf2); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Toolbar ──────────────────────────────────────────── -->
+<div id="tb">
+  <span class="ttl">Pennyscope</span>
+  <div class="sep"></div>
+
+  <button class="tbtn" onclick="document.getElementById('fi').click()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg> Open Image
+  </button>
+  <input id="fi" type="file" accept="image/*" style="display:none" onchange="loadImageFile(event)">
+
+  <button class="tbtn" onclick="saveProject()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+      <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+    </svg> Save
+  </button>
+  <button class="tbtn" onclick="document.getElementById('pi').click()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg> Load
+  </button>
+  <input id="pi" type="file" accept=".json" style="display:none" onchange="loadProject(event)">
+
+  <div class="sep"></div>
+
+  <button class="tbtn active" id="btn-pan"       onclick="setTool('pan')"       title="Pan / Zoom  [P]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/>
+      <polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/>
+      <line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>
+    </svg> Pan
+  </button>
+  <button class="tbtn" id="btn-calibrate" onclick="setTool('calibrate')" title="Set scale  [C]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="2" y1="12" x2="22" y2="12"/>
+      <line x1="2" y1="9" x2="2" y2="15"/><line x1="22" y1="9" x2="22" y2="15"/>
+      <line x1="12" y1="10" x2="12" y2="14"/>
+    </svg> Calibrate
+  </button>
+  <button class="tbtn" id="btn-axis" onclick="setTool('axis')" title="Set measurement axis  [A]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="2" y1="12" x2="22" y2="12"/>
+      <polyline points="16 6 22 12 16 18"/>
+    </svg> Axis
+  </button>
+  <button class="tbtn" id="btn-rings" onclick="setTool('rings')" title="Mark ring boundaries  [R]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+    </svg> Mark Rings
+  </button>
+
+  <div class="sep"></div>
+
+  <button class="tbtn" onclick="undoLast()" title="Undo last ring  [Ctrl+Z]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="9 14 4 9 9 4"/>
+      <path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+    </svg> Undo
+  </button>
+  <button class="tbtn danger" onclick="clearRings()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+    </svg> Clear
+  </button>
+
+  <div class="sep"></div>
+
+  <span id="piece-badge">Bass</span>
+
+  <button class="tbtn" onclick="adjustZoom(1.2)"  title="Zoom in  [+]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+    </svg>
+  </button>
+  <button class="tbtn" onclick="adjustZoom(1/1.2)" title="Zoom out  [−]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      <line x1="8" y1="11" x2="14" y2="11"/>
+    </svg>
+  </button>
+  <button class="tbtn" onclick="fitWindow()" title="Fit  [F]">Fit</button>
+</div>
+
+<!-- ── Main ─────────────────────────────────────────────── -->
+<div id="main">
+
+  <div id="cw" class="tool-pan"
+    ondragover="event.preventDefault()"
+    ondrop="handleDrop(event)">
+    <canvas id="cv"></canvas>
+
+    <div id="drop-msg">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span class="h1">Drop image here or click "Open Image"</span>
+      <span class="h2">JPG · PNG · TIFF · BMP</span>
+    </div>
+
+    <div id="zoom-lbl">100%</div>
+    <div id="hint-bar">Open an image to begin</div>
+  </div>
+
+  <!-- ── Sidebar ──────────────────────────────────────── -->
+  <div id="sb">
+
+    <!-- Series Info -->
+    <div class="panel">
+      <div class="ptit">Series Info</div>
+      <div class="row">
+        <label>Series ID</label>
+        <input id="sid" type="text" value="VIOLIN01" maxlength="8">
+      </div>
+      <div class="row">
+        <label>Image Path</label>
+        <input id="img-path" type="text" placeholder="e.g., C:\images\sample.jpg" style="font-size:11px">
+      </div>
+      <div class="row">
+        <label>Front</label>
+        <select id="front-type" onchange="setFrontType(this.value)">
+          <option value="two" selected>Two piece</option>
+          <option value="one">One piece</option>
+        </select>
+      </div>
+
+      <!-- One-piece direction -->
+      <div id="one-dir-row" class="row" style="display:none">
+        <label>Direction</label>
+        <select id="one-dir">
+          <option value="L-D">Light → Dark</option>
+          <option value="D-L">Dark → Light</option>
+        </select>
+      </div>
+
+      <!-- Two-piece controls -->
+      <div id="two-opts">
+        <div class="ptabs" style="margin-top:6px">
+          <button class="ptab bass-active" id="ptab-0" onclick="setActivePiece(0)">Bass side</button>
+          <button class="ptab"             id="ptab-1" onclick="setActivePiece(1)">Treble side</button>
+        </div>
+        <!-- Both halves default to Light -> Dark. This setting describes the wood along
+             the axis you drew, not the direction across the screen: each half is traced
+             separately from its own outer edge in towards the joint, so both read
+             light -> dark. Treble used to default to Dark -> Light, which silently
+             reversed the treble series for anyone who followed the instructions below. -->
+        <div class="row">
+          <label>Bass direction</label>
+          <select id="dir-0">
+            <option value="L-D">Light → Dark</option>
+            <option value="D-L">Dark → Light</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Treble direction</label>
+          <select id="dir-1">
+            <option value="L-D">Light → Dark</option>
+            <option value="D-L">Dark → Light</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Measuring-direction guidance (collapsible: it is long, and only needed while
+         you are learning the convention) -->
+    <div class="panel collapsible" id="panel-meas-dir" style="background:rgba(58,107,71,.12)">
+      <div class="ptit" style="color:var(--acc2)" onclick="togglePanel('panel-meas-dir')"
+           title="Show or hide this guidance">
+        <span class="chev">▾</span>↳ Measuring direction
+      </div>
+      <div class="pbody" style="font-size:11px; color:var(--txt); line-height:1.5">
+        Draw the axis following <b>light → dark</b>: pale soft earlywood into the dark hard latewood line.
+        That makes <b>ring 1 the oldest ring</b>.
+        <div style="margin-top:5px">
+          On a two-piece top, trace <b>each half the same way</b>, starting at that half's
+          <b>outer edge</b> and finishing at the <b>centre joint</b> — the youngest wood sits at the
+          joint, the oldest at the edge. Both halves therefore read light → dark; leave both
+          direction settings on that unless the wood plainly says otherwise.
+        </div>
+      </div>
+    </div>
+
+    <!-- Instrument metadata (stored in the project JSON — no database needed) -->
+    <div class="panel">
+      <div class="ptit">Instrument Info</div>
+      <div class="row">
+        <label>Instrument / maker</label>
+        <input id="meta-instrument" type="text" placeholder="e.g. violin, J. Doe">
+      </div>
+      <div class="row">
+        <label title="What expertise claims. Kept separate from any dendro result on purpose — the measurement must not simply echo the attribution.">Attributed origin*</label>
+        <input id="meta-attrib" type="text" placeholder="expert opinion (not measured)">
+      </div>
+      <div class="row" style="align-items:flex-start">
+        <label>Notes</label>
+        <textarea id="meta-notes" rows="2" placeholder="condition, sampling notes…"
+          style="width:118px; background:var(--sf2); border:1px solid var(--bdr); border-radius:4px; color:var(--txt); padding:3px 6px; font-size:12px; resize:vertical; font-family:inherit"></textarea>
+      </div>
+      <div style="font-size:9px; color:var(--dim); line-height:1.4; margin-top:2px">
+        *Attribution is expert opinion, recorded separately. Cross-dating shows wood relationships, not origin or identity.
+      </div>
+    </div>
+
+    <!-- Auto-detect rings along the axis (client-side; you review & fix) -->
+    <div class="panel">
+      <div class="ptit">Auto-detect rings (beta)</div>
+      <div class="row">
+        <label>Sensitivity</label>
+        <input id="det-sens" type="range" min="1" max="10" value="7" style="width:118px">
+      </div>
+      <div class="row">
+        <label>Band width (px)</label>
+        <input id="det-band" type="number" value="4" min="0" max="40" step="1">
+      </div>
+      <button id="btn-detect" onclick="detectRings()" style="width:100%; margin-top:4px; padding:7px; border:1px solid var(--bdr); border-radius:5px; background:var(--sf2); color:var(--txt); cursor:pointer; font-size:12px; font-weight:500">◎ Detect rings on axis</button>
+      <div id="det-status" style="font-size:10px; color:var(--dim); margin-top:5px; min-height:14px"></div>
+    </div>
+
+    <!-- Status -->
+    <div class="panel">
+      <div class="ptit">Status</div>
+      <div class="stat"><span class="dot" id="d-cal"></span><span id="s-cal">Calibration: not set</span></div>
+      <!-- One-piece stats -->
+      <div id="one-stats" style="display:none">
+        <div class="stat"><span class="dot" id="d-ax"></span> <span id="s-ax">Axis: not set</span></div>
+        <div class="stat"><span class="dot" id="d-ri"></span> <span id="s-ri">Rings: 0</span></div>
+      </div>
+      <!-- Two-piece stats -->
+      <div id="two-stats">
+        <div class="stat"><span class="dot" id="d-ax0"></span><span id="s-ax0">Bass axis: not set</span></div>
+        <div class="stat"><span class="dot" id="d-ri0"></span><span id="s-ri0">Bass rings: 0</span></div>
+        <div class="stat" style="margin-top:3px"><span class="dot" id="d-ax1" style="background:var(--cyn)"></span><span id="s-ax1">Treble axis: not set</span></div>
+        <div class="stat"><span class="dot" id="d-ri1" style="background:var(--cyn)"></span><span id="s-ri1">Treble rings: 0</span></div>
+      </div>
+    </div>
+
+    <!-- Dating Analysis -->
+    <div class="panel">
+      <div class="ptit">Dating Analysis</div>
+      <div class="stat">
+        <span class="dot" id="d-srv"></span>
+        <span id="t-srv">Checking server…</span>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label>Mode</label>
+        <select id="ana-mode" onchange="onModeChange()">
+          <option value="violin">Tonewood forest references</option>
+          <option value="alpine">Alpine (spruce/fir)</option>
+          <option value="alpine_pine">Alpine stone pine (cembra)</option>
+          <option value="baltic">Baltic</option>
+          <option value="all">All categories</option>
+          <option value="custom">My own reference file…</option>
+        </select>
+      </div>
+      <div class="row" id="ana-custom-row" style="display:none">
+        <label>Reference file</label>
+        <input type="file" id="ana-custom-file" accept=".csv,.rwl,.txt" onchange="onCustomFile()">
+      </div>
+      <div class="row" id="ana-custom-name" style="display:none; font-size:11px; opacity:.75">
+        <label></label><span id="ana-custom-label">no file chosen</span>
+      </div>
+      <div class="row">
+        <label>Min overlap</label>
+        <input type="number" id="ana-ovlp" value="60" min="10" max="300">
+      </div>
+      <div class="row">
+        <label>Detrending</label>
+        <select id="ana-detrend">
+          <option value="fixed:32">Fixed 32-year (standard)</option>
+          <option value="fixed:20">Fixed 20-year (flexible)</option>
+          <option value="fixed:50">Fixed 50-year (stiff)</option>
+          <option value="percent:67">Percent 67% (legacy)</option>
+          <option value="percent:80">Percent 80% (legacy stiff)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Index</label>
+        <select id="ana-index">
+          <option value="all">All three (spline + bp + hollstein)</option>
+          <option value="spline">Spline only</option>
+          <option value="bp">Baillie-Pilcher only</option>
+          <option value="hollstein">Hollstein only</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Refs ending after</label>
+        <input type="number" id="ana-mey" value="1500" min="0" max="2100">
+      </div>
+      <div class="row">
+        <label>Top results</label>
+        <input type="number" id="ana-topn" value="10" min="1" max="100">
+      </div>
+      <div id="xm-row" class="row" style="margin-top:4px">
+        <button id="btn-xm" onclick="runCrossmatch()" disabled style="width:100%">⚡ Cross-match pieces</button>
+      </div>
+      <button id="btn-run" onclick="runAnalysis()" disabled>▶ Run Dating Analysis</button>
+    </div>
+
+    <!-- Measurements -->
+    <div id="meas">
+      <div class="ptit">Ring Widths</div>
+      <div id="spark-wrap" style="display:none">
+        <canvas id="spark"></canvas>
+        <div id="spark-cap"><span id="spark-range"></span><span id="spark-warn"></span></div>
+      </div>
+      <div id="no-rings">No measurements yet.</div>
+      <table id="rtbl" style="display:none">
+        <thead><tr><th>#</th><th id="col-w">Width mm</th><th id="col-c">Cum. mm</th></tr></thead>
+        <tbody id="rtbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Export -->
+    <div id="exp-panel">
+      <div class="ptit">Export (active piece)</div>
+      <div class="xbtns">
+        <button class="xbtn" onclick="exportCSV()">CSV</button>
+        <button class="xbtn" onclick="exportTucson()">Tucson RWL</button>
+        <button class="xbtn" onclick="exportFH()">Heidelberg</button>
+      </div>
+    </div>
+
+    <!-- Setup Panel -->
+    <div id="setup-panel" style="display:none; border-top:1px solid var(--bdr)">
+      <div class="ptit">⚙️ Setup</div>
+      <div style="font-size:11px; color:var(--dim); line-height:1.5; margin-bottom:12px; padding:0 8px">
+        Download RWL files from NOAA
+      </div>
+      <div style="margin-bottom:15px; padding:0 8px">
+        <div style="font-weight:600; font-size:12px; margin-bottom:8px">Step 1: Download & Index</div>
+        <button id="btn-dl" class="xbtn" onclick="runSetupDownload()" style="width:100%; padding:8px">Download Files</button>
+        <div id="dl-status" style="font-size:10px; color:var(--dim); margin-top:6px; min-height:16px; word-break:break-word"></div>
+      </div>
+      <div id="step2" style="opacity:0.5; pointer-events:none; margin-bottom:15px; padding:0 8px">
+        <div style="font-weight:600; font-size:12px; margin-bottom:8px">Step 2: Fetch Tonewood Forest References</div>
+        <button id="btn-vln" class="xbtn" onclick="runSetupViolin()" style="width:100%; padding:8px">Build References</button>
+        <div id="vln-status" style="font-size:10px; color:var(--dim); margin-top:6px; min-height:16px; word-break:break-word"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Results modal -->
+<div id="res-bg">
+  <div id="res-modal">
+    <div id="res-hd">
+      <h3 id="res-title">Dating Results</h3>
+      <button onclick="closeResults()">×</button>
+    </div>
+    <div id="int-bar">
+      <pre id="int-text" style="font-size:12px; padding:8px; margin:0; background:var(--sf2); border-radius:4px; margin-bottom:10px; white-space:pre-wrap; word-wrap:break-word; cursor:text; user-select:text"></pre>
+    </div>
+    <div id="res-stats">
+      <div class="rstat"><div class="v" id="r-year">—</div><div class="l">Best Year</div></div>
+      <div class="rstat"><div class="v" id="r-tval">—</div><div class="l">T-Value</div></div>
+      <div class="rstat"><div class="v" id="r-glk">—</div><div class="l">GLK %</div></div>
+      <div class="rstat"><div class="v" id="r-ovlp">—</div><div class="l">Overlap</div></div>
+      <div class="rstat"><div class="v" id="r-corr">—</div><div class="l">r</div></div>
+      <div class="rstat"><div class="v" id="r-r2">—</div><div class="l">r² shared</div></div>
+      <div class="rstrength" id="r-str">—</div>
+    </div>
+    <pre id="r-index" style="font-size:12px; padding:8px; margin:10px 0 0; background:var(--sf2); border-radius:4px; white-space:pre-wrap; word-wrap:break-word; cursor:text; user-select:text"></pre>
+    <pre id="r-class" style="font-size:12px; padding:8px; margin:10px 0 0; background:var(--sf2); border-radius:4px; white-space:pre-wrap; word-wrap:break-word; cursor:text; user-select:text"></pre>
+    <img id="res-plot" alt="Analysis plot">
+    <div id="res-top">
+      <div class="sec">Top Matches</div>
+      <table id="top-tbl">
+        <thead><tr><th>#</th><th>End Year</th><th>T-Value</th><th>GLK %</th><th>Reference File</th></tr></thead>
+        <tbody id="top-body"></tbody>
+      </table>
+    </div>
+    <div id="res-log">
+      <details>
+        <summary>Analysis log</summary>
+        <pre id="log-pre"></pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- Calibration modal -->
+<div id="cal-bg">
+  <div id="cal-modal">
+    <h3>Enter calibration distance</h3>
+    <p>Real-world distance between the two marked points (mm):</p>
+    <input id="cal-inp" type="number" placeholder="mm" step="0.01" min="0.001">
+    <div class="mrow">
+      <button class="mbtn no" onclick="calCancel()">Cancel</button>
+      <button class="mbtn ok" onclick="calOK()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- The setup panel lives in the sidebar (#sb). A second copy of it stood here, repeating
+     setup-panel, btn-dl, dl-status, step2, btn-vln and vln-status: getElementById returns
+     the first match, so every status update landed in the sidebar copy and this one was
+     unreachable markup that only invited edits to the wrong block. -->
+
+<!-- ── JavaScript ──────────────────────────────────────── -->
+<script>
+// ============================================================
+// State
+// ============================================================
+// Piece 0 = Bass (or the only piece in one-piece mode)
+// Piece 1 = Treble
+const PCOL = ['#fbbf24', '#22d3ee'];   // bass=yellow, treble=cyan
+
+const S = {
+  img: null, imgW: 0, imgH: 0,
+  panX: 0, panY: 0, zoom: 1,
+
+  scale: null, calPts: [], calTemp: null,
+
+  pieces: [
+    { axisA: null, axisB: null, axisTmp: null, rings: [] },
+    { axisA: null, axisB: null, axisTmp: null, rings: [] },
+  ],
+  ap: 0,             // active piece index
+  // Two-piece tops are the common case by a wide margin; one-piece is the rarity.
+  // Starting on 'one' meant most sessions began by switching the setting.
+  frontType: 'two',  // 'one' | 'two'
+
+  panning: false, panMouse0: null, panPan0: null,
+  tool: 'pan',
+  mouse: null,
+  dragRing: null,   // { pi: pieceIndex, ri: ringIndex } while dragging an existing ring
+};
+
+function cp()  { return S.pieces[S.ap];  }   // current piece
+function p(i)  { return S.pieces[i];     }   // piece by index
+
+// ============================================================
+// Canvas
+// ============================================================
+const wrap = document.getElementById('cw');
+const cv   = document.getElementById('cv');
+const ctx  = cv.getContext('2d');
+
+function resizeCanvas() { cv.width = wrap.clientWidth; cv.height = wrap.clientHeight; render(); }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============================================================
+// Image loading
+// ============================================================
+function loadImageFile(e) {
+  const f = e.target.files[0];
+  if (f) {
+    S.imagePath = f.webkitRelativePath || f.name;
+    document.getElementById('img-path').value = S.imagePath;
+    readFile(f);
+  }
+}
+function handleDrop(e) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f?.type.startsWith('image/')) {
+    S.imagePath = f.webkitRelativePath || f.name;
+    readFile(f);
+  }
+}
+
+function readFile(file) {
+  const r = new FileReader();
+  r.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      S.img = img; S.imgW = img.naturalWidth; S.imgH = img.naturalHeight;
+      cacheImagePixels();
+      document.getElementById('drop-msg').style.display = 'none';
+      fitWindow(); refreshStatus();
+    };
+    img.src = ev.target.result;
+  };
+  r.readAsDataURL(file);
+}
+
+// Grab the image's raw pixels once so ring auto-detection can read brightness
+// along the axis without touching the display canvas.
+function cacheImagePixels() {
+  S.pix = null;
+  try {
+    const oc = document.createElement('canvas');
+    oc.width = S.imgW; oc.height = S.imgH;
+    const og = oc.getContext('2d', { willReadFrequently: true });
+    og.drawImage(S.img, 0, 0);
+    S.pix = og.getImageData(0, 0, S.imgW, S.imgH);
+  } catch (e) {
+    // Cross-origin image → canvas is tainted; detection will fall back to a warning.
+    S.pix = null;
+  }
+}
+
+// ============================================================
+// Viewport
+// ============================================================
+function s2i(sx, sy) { return { x: (sx - S.panX) / S.zoom, y: (sy - S.panY) / S.zoom }; }
+function i2s(ix, iy) { return { x: ix * S.zoom + S.panX,   y: iy * S.zoom + S.panY   }; }
+
+function fitWindow() {
+  if (!S.img) return;
+  const z = Math.min((wrap.clientWidth - 20) / S.imgW, (wrap.clientHeight - 20) / S.imgH);
+  S.zoom = z;
+  S.panX = (wrap.clientWidth  - S.imgW * z) / 2;
+  S.panY = (wrap.clientHeight - S.imgH * z) / 2;
+  render(); updateZL();
+}
+function adjustZoom(f, cx, cy) {
+  if (cx === undefined) { cx = cv.width / 2; cy = cv.height / 2; }
+  const nz = Math.max(.04, Math.min(60, S.zoom * f));
+  const r  = nz / S.zoom;
+  S.panX = cx - (cx - S.panX) * r; S.panY = cy - (cy - S.panY) * r;
+  S.zoom = nz; render(); updateZL();
+}
+function updateZL() { document.getElementById('zoom-lbl').textContent = Math.round(S.zoom * 100) + '%'; }
+
+// ============================================================
+// Front-type & piece switching
+// ============================================================
+function setFrontType(t) {
+  S.frontType = t;
+  const two = t === 'two';
+  document.getElementById('two-opts').style.display  = two ? '' : 'none';
+  document.getElementById('one-dir-row').style.display = two ? 'none' : '';
+  document.getElementById('one-stats').style.display  = two ? 'none' : '';
+  document.getElementById('two-stats').style.display  = two ? '' : 'none';
+  document.getElementById('xm-row').style.display     = two ? '' : 'none';
+  document.getElementById('piece-badge').style.display = two ? '' : 'none';
+  if (!two) S.ap = 0;
+  refreshStatus(); render();
+}
+
+function setActivePiece(i) {
+  S.ap = i;
+  document.getElementById('ptab-0').className = 'ptab' + (i === 0 ? ' bass-active' : '');
+  document.getElementById('ptab-1').className = 'ptab' + (i === 1 ? ' treble-active' : '');
+  const badge = document.getElementById('piece-badge');
+  badge.textContent = i === 0 ? 'Bass' : 'Treble';
+  badge.className   = i === 0 ? 'piece-badge' : 'piece-badge treble';
+  // Update hint
+  setHint(HINTS[S.tool] || '');
+  refreshStatus(); refreshMeasurements(); render();
+}
+
+// ============================================================
+// Tool management
+// ============================================================
+const HINTS = {
+  pan:       'Drag to pan · Scroll to zoom',
+  calibrate: 'Click two reference points of known distance to set scale',
+  axis:      'Draw along light → dark (earlywood → latewood, usually edge → center) so ring 1 is the oldest ring · right-click to cancel',
+  rings:     'Click to add · drag to move · click between rings inserts · right-click / Del removes a ring · Ctrl+Z undoes last',
+};
+
+function setTool(t) {
+  S.calTemp      = null;
+  cp().axisTmp   = null;
+  if (t !== 'axis' && !cp().axisB) cp().axisA = null;
+
+  S.tool = t;
+  ['pan','calibrate','axis','rings'].forEach(k =>
+    document.getElementById('btn-' + k).classList.toggle('active', k === t)
+  );
+  wrap.className = 'tool-' + t;
+  setHint(HINTS[t] || '');
+  render();
+}
+function setHint(m) { document.getElementById('hint-bar').textContent = m; }
+
+// ============================================================
+// Mouse events
+// ============================================================
+cv.addEventListener('mousedown',   onDown);
+cv.addEventListener('mousemove',   onMove);
+cv.addEventListener('mouseup',     onUp);
+cv.addEventListener('wheel',       onWheel, { passive: false });
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  // Right-click on a ring deletes that specific ring; on empty space, undo the last one.
+  if (S.tool === 'rings' && S.img) {
+    const { sx, sy } = cvXY(e);
+    const hit = findNearRing(s2i(sx, sy));
+    if (hit) { deleteRing(hit); return; }
+  }
+  undoLast();
+});
+
+function cvXY(e) { const r = cv.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; }
+
+// Returns { pi, ri } of the ring point within 10 screen-px of ip, or null
+function findNearRing(ip) {
+  const thresh = 12 / S.zoom;
+  let best = null, bestD = Infinity;
+  S.pieces.forEach((c, pi) => {
+    c.rings.forEach((pt, ri) => {
+      const d = Math.hypot(pt.x - ip.x, pt.y - ip.y);
+      if (d < thresh && d < bestD) { bestD = d; best = { pi, ri }; }
+    });
+  });
+  return best;
+}
+
+function onDown(e) {
+  if (e.button !== 0) return;
+  const { sx, sy } = cvXY(e);
+  const ip = s2i(sx, sy);
+
+  if (S.tool === 'pan') {
+    S.panning = true; S.panMouse0 = { x: sx, y: sy }; S.panPan0 = { x: S.panX, y: S.panY };
+    wrap.classList.add('drag'); return;
+  }
+  if (!S.img) return;
+
+  if (S.tool === 'calibrate') {
+    if (!S.calTemp) {
+      S.calTemp = ip; setHint('Calibrate: click the second reference point');
+    } else {
+      S.calPts = [S.calTemp, ip]; S.calTemp = null; openCalModal();
+    }
+    render(); return;
+  }
+
+  if (S.tool === 'axis') {
+    const c = cp();
+    if (!c.axisA || c.axisB) {
+      // About to start a fresh axis. If this piece already has a finished axis
+      // *and* marked rings, warn first — a common slip is forgetting to switch to
+      // the Treble side and re-drawing over already-measured Bass work.
+      if (c.axisB && c.rings.length > 0) {
+        const who = S.frontType === 'two' ? (S.ap === 0 ? 'Bass' : 'Treble') + ' side' : 'this piece';
+        if (!confirm('Redraw the axis on the ' + who + '?\n\nIt already has ' + c.rings.length +
+                     ' ring points measured against the current axis; they will no longer line up.\n\n' +
+                     (S.frontType === 'two' ? 'If you meant to measure the other side, click Cancel and switch sides first.' : ''))) {
+          return;
+        }
+      }
+      c.axisA = ip; c.axisB = null; c.axisTmp = null;
+      setHint('Axis: click end point');
+    } else {
+      c.axisB = ip; c.axisTmp = null;
+      refreshStatus(); render();
+      setHint('Axis set — switch to Mark Rings  [R]');
+    }
+    render(); return;
+  }
+
+  if (S.tool === 'rings') {
+    const c = cp();
+    if (!c.axisA || !c.axisB) { setHint('Set the measurement axis first  [A]'); return; }
+    // Click near an existing point → start dragging it instead of adding a new one
+    const hit = findNearRing(ip);
+    if (hit) { S.dragRing = hit; render(); return; }
+    // Otherwise add new point
+    const t = axisT(ip.x, ip.y, c);
+    c.rings.push({ x: ip.x, y: ip.y, t });
+    refreshMeasurements(); render(); return;
+  }
+}
+
+function onMove(e) {
+  const { sx, sy } = cvXY(e);
+  S.mouse = s2i(sx, sy);
+
+  if (S.panning) {
+    S.panX = S.panPan0.x + (sx - S.panMouse0.x);
+    S.panY = S.panPan0.y + (sy - S.panMouse0.y);
+  }
+
+  // Dragging an existing ring point
+  if (S.dragRing) {
+    const c = p(S.dragRing.pi);
+    const t = axisT(S.mouse.x, S.mouse.y, c);
+    c.rings[S.dragRing.ri] = { x: S.mouse.x, y: S.mouse.y, t };
+    refreshMeasurements();
+    render(); return;
+  }
+
+  if (S.tool === 'axis' && cp().axisA && !cp().axisB) cp().axisTmp = S.mouse;
+
+  // Change cursor to 'move' when hovering over an existing ring point
+  if (S.tool === 'rings') {
+    wrap.style.cursor = findNearRing(S.mouse) ? 'move' : '';
+  }
+
+  render();
+}
+function onUp() {
+  if (S.panning) { S.panning = false; wrap.classList.remove('drag'); }
+  if (S.dragRing) { S.dragRing = null; refreshMeasurements(); render(); }
+}
+function onWheel(e) {
+  e.preventDefault(); const { sx, sy } = cvXY(e);
+  adjustZoom(e.deltaY < 0 ? 1.1 : 1/1.1, sx, sy);
+}
+
+// ============================================================
+// Axis math (per-piece)
+// ============================================================
+function axisT(px, py, c) {
+  const { axisA: A, axisB: B } = c;
+  if (!A || !B) return 0;
+  const abx = B.x - A.x, aby = B.y - A.y;
+  const l2  = abx*abx + aby*aby;
+  return l2 === 0 ? 0 : ((px-A.x)*abx + (py-A.y)*aby) / l2;
+}
+function axisPt(t, c) { return { x: c.axisA.x + t*(c.axisB.x - c.axisA.x), y: c.axisA.y + t*(c.axisB.y - c.axisA.y) }; }
+function axisLenPx(c) {
+  if (!c.axisA || !c.axisB) return 0;
+  return Math.hypot(c.axisB.x - c.axisA.x, c.axisB.y - c.axisA.y);
+}
+
+// ============================================================
+// Auto-detection of ring boundaries along the axis
+// ============================================================
+// Sample luminance at an image pixel (bilinear-ish nearest), 0=black..255=white.
+function lumaAt(x, y) {
+  const px = S.pix; if (!px) return 0;
+  const xi = Math.max(0, Math.min(px.width  - 1, Math.round(x)));
+  const yi = Math.max(0, Math.min(px.height - 1, Math.round(y)));
+  const o = (yi * px.width + xi) * 4;
+  return 0.299 * px.data[o] + 0.587 * px.data[o + 1] + 0.114 * px.data[o + 2];
+}
+
+function detectRings() {
+  const st = document.getElementById('det-status');
+  const c = cp();
+  if (!S.img)                 { st.textContent = 'Load an image first.'; return; }
+  if (!S.pix)                 { st.textContent = '⚠ Cannot read pixels (cross-origin image). Re-open the file locally.'; return; }
+  if (!c.axisA || !c.axisB)   { st.textContent = 'Set the measurement axis first  [A]'; return; }
+  if (c.rings.length && !confirm('Replace the ' + c.rings.length + ' existing points on this piece with auto-detected rings?')) return;
+
+  const A = c.axisA, B = c.axisB;
+  const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;        // along-axis unit
+  const nx = -dy / len, ny = dx / len;       // perpendicular unit
+  const band = Math.max(0, parseInt(document.getElementById('det-band').value) || 0);
+  const steps = Math.max(20, Math.round(len));  // ~1 sample per axis pixel
+
+  // 1) Brightness profile along the axis, averaged over a perpendicular band.
+  const prof = new Array(steps), tvals = new Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    const cx = A.x + t * dx, cy = A.y + t * dy;
+    let sum = 0, cnt = 0;
+    for (let j = -band; j <= band; j++) { sum += lumaAt(cx + nx * j, cy + ny * j); cnt++; }
+    prof[i] = sum / cnt; tvals[i] = t;
+  }
+
+  // 2) Light smoothing to kill pixel noise without erasing narrow rings.
+  const sm = smooth1d(prof, 1);
+
+  // 3) High-pass: subtract a broad baseline so uneven lighting across the image
+  //    (one side darker) can't hide rings on the dark side. Rings become local
+  //    dips around zero regardless of the overall brightness gradient — this is
+  //    what lets us catch the faint/low-contrast rings a global threshold misses.
+  const bw = Math.min(80, Math.max(10, Math.round(steps / 12)));
+  const base = smooth1d(prof, bw);
+  const hp = sm.map((v, i) => v - base[i]);
+
+  // 4) Detect prominent minima of the high-passed profile. Threshold scales with
+  //    the signal's own spread, and the sensitivity slider sweeps it wide.
+  const sd = std(hp);
+  const sens = parseInt(document.getElementById('det-sens').value) || 5;   // 1..10
+  const minProm = Math.max(0.4, sd * (1.5 - sens * 0.145));  // sens1≈1.36σ … sens10≈0.05σ
+  const minGapPx = 2;                                        // rings closer than this are merged
+  const idx = findMinima(hp, minProm);
+
+  // 4) Convert accepted minima to ring points on the axis, enforcing spacing.
+  const newRings = [];
+  let lastT = -1;
+  for (const i of idx) {
+    const t = tvals[i];
+    if (lastT >= 0 && Math.abs(t - lastT) * len < minGapPx) continue;
+    const pt = { x: A.x + t * dx, y: A.y + t * dy };
+    newRings.push({ x: pt.x, y: pt.y, t });
+    lastT = t;
+  }
+
+  c.rings = newRings;
+  refreshMeasurements(); render();
+  st.textContent = newRings.length
+    ? `Detected ${newRings.length} boundaries (${Math.max(0, newRings.length - 1)} rings). Review & fix by hand.`
+    : 'No rings detected — try higher sensitivity or a cleaner axis.';
+}
+
+function smooth1d(a, w) {
+  const out = new Array(a.length);
+  for (let i = 0; i < a.length; i++) {
+    let s = 0, n = 0;
+    for (let k = -w; k <= w; k++) { const j = i + k; if (j >= 0 && j < a.length) { s += a[j]; n++; } }
+    out[i] = s / n;
+  }
+  return out;
+}
+function std(a) {
+  if (!a.length) return 0;
+  const m = a.reduce((x, y) => x + y, 0) / a.length;
+  return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / a.length);
+}
+
+// Rings whose width is wildly out of step with their neighbours — a spike usually
+// means a missed ring counted as one wide one; a dip means one ring split in two.
+// Shared by the sparkline and the ring-width table so both agree.
+function computeFlags(widths) {
+  return widths.map((w, i) => {
+    const nb = [widths[i - 1], widths[i + 1]].filter(v => v != null);
+    if (!nb.length) return false;
+    const loc = nb.reduce((a, b) => a + b, 0) / nb.length;
+    return w > loc * 2.4 || w < loc * 0.42;
+  });
+}
+
+// Local minima whose prominence (rise to the higher adjacent peak on each side)
+// exceeds `minProm`.
+function findMinima(a, minProm) {
+  const res = [];
+  for (let i = 1; i < a.length - 1; i++) {
+    if (!(a[i] <= a[i - 1] && a[i] < a[i + 1])) continue;
+    // walk left to the local max before this dip
+    let l = i, leftMax = a[i];
+    while (l > 0 && a[l - 1] >= a[l]) { l--; if (a[l] > leftMax) leftMax = a[l]; }
+    let r = i, rightMax = a[i];
+    while (r < a.length - 1 && a[r + 1] >= a[r]) { r++; if (a[r] > rightMax) rightMax = a[r]; }
+    const prom = Math.min(leftMax, rightMax) - a[i];
+    if (prom >= minProm) res.push(i);
+  }
+  return res;
+}
+
+// ============================================================
+// Measurements
+// ============================================================
+function sortedRings(c) { return [...c.rings].sort((a, b) => a.t - b.t); }
+
+function getRingWidths(c) {
+  const s = sortedRings(c);
+  if (s.length < 2) return [];
+  return s.slice(1).map((pt, i) => {
+    const dt = pt.t - s[i].t;
+    const px = Math.abs(dt) * axisLenPx(c);
+    return S.scale ? px / S.scale : px;
+  });
+}
+
+function refreshMeasurements() {
+  const c      = cp();
+  const widths = getRingWidths(c);
+  const noRings = document.getElementById('no-rings');
+  const tbl    = document.getElementById('rtbl');
+  const tbody  = document.getElementById('rtbody');
+
+  if (widths.length === 0) {
+    noRings.style.display = ''; tbl.style.display = 'none';
+    document.getElementById('spark-wrap').style.display = 'none';
+    refreshStatus(); return;
+  }
+  noRings.style.display = 'none'; tbl.style.display = '';
+  drawSpark(widths);
+
+  const unit = S.scale ? 'mm' : 'px';
+  document.getElementById('col-w').textContent = 'Width\u00a0' + unit;
+  document.getElementById('col-c').textContent = 'Cum.\u00a0'  + unit;
+
+  const flags = computeFlags(widths);
+  tbody.innerHTML = '';
+  let cum = 0;
+  widths.forEach((w, i) => {
+    cum += w;
+    const tr = document.createElement('tr');
+    if (flags[i]) tr.className = 'flag';
+    if (flags[i]) tr.title = 'Width out of step with neighbours — possible missed or split ring';
+    tr.innerHTML = `<td>${i+1}</td><td>${w.toFixed(S.scale ? 3 : 1)}</td><td>${cum.toFixed(S.scale ? 3 : 1)}</td>`;
+    tbody.appendChild(tr);
+  });
+  refreshStatus();
+}
+
+// Live ring-width profile — lets you spot a mis-click (a spike = missed ring counted
+// as one wide ring; a dip = one ring split into two) without leaving the image.
+function drawSpark(widths) {
+  const wrap = document.getElementById('spark-wrap');
+  const cvs  = document.getElementById('spark');
+  if (widths.length < 2) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+
+  const dpr = window.devicePixelRatio || 1;
+  const cw  = cvs.clientWidth || 250, ch = 46;
+  cvs.width = cw * dpr; cvs.height = ch * dpr;
+  const g = cvs.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, cw, ch);
+
+  const mn = Math.min(...widths), mx = Math.max(...widths), rng = (mx - mn) || 1;
+  const pad = 5, x0 = pad, x1 = cw - pad, yb = ch - pad, yt = pad;
+  const xi = i => x0 + (x1 - x0) * (widths.length === 1 ? 0.5 : i / (widths.length - 1));
+  const yi = w => yb - (yb - yt) * ((w - mn) / rng);
+
+  const flags = computeFlags(widths);
+
+  g.strokeStyle = '#74b887'; g.lineWidth = 1.5; g.beginPath();
+  widths.forEach((w, i) => { const X = xi(i), Y = yi(w); i ? g.lineTo(X, Y) : g.moveTo(X, Y); });
+  g.stroke();
+  widths.forEach((w, i) => {
+    g.fillStyle = flags[i] ? '#fbbf24' : '#74b887';
+    g.beginPath(); g.arc(xi(i), yi(w), flags[i] ? 2.8 : 1.6, 0, 7); g.fill();
+  });
+
+  const unit = S.scale ? 'mm' : 'px';
+  const dp = S.scale ? 3 : 1;
+  document.getElementById('spark-range').textContent =
+    `${widths.length} rings · ${mn.toFixed(dp)}–${mx.toFixed(dp)} ${unit}`;
+  const nFlag = flags.filter(Boolean).length;
+  document.getElementById('spark-warn').textContent =
+    nFlag ? `⚠ ${nFlag} possible mis-click${nFlag > 1 ? 's' : ''}` : '';
+}
+
+function refreshStatus() {
+  // Calibration
+  const dc = document.getElementById('d-cal'), sc = document.getElementById('s-cal');
+  if (S.scale) {
+    dc.className = 'dot ok'; sc.textContent = 'Scale: ' + S.scale.toFixed(2) + ' px/mm';
+  } else {
+    dc.className = 'dot maybe'; sc.textContent = 'No scale — px used (ok for dating)';
+  }
+
+  function pieceStat(i, dotAx, lblAx, dotRi, lblRi) {
+    const c    = p(i);
+    const dax  = document.getElementById(dotAx),  sax = document.getElementById(lblAx);
+    const dri  = document.getElementById(dotRi),  sri = document.getElementById(lblRi);
+    const col  = i === 0 ? 'ok' : null;  // bass uses green, treble uses its own color
+
+    if (c.axisA && c.axisB) {
+      dax.className = 'dot ' + (col || 'ok');
+      dax.style.background = i === 1 ? 'var(--cyn)' : '';
+      const mm = S.scale ? (axisLenPx(c)/S.scale).toFixed(1) + ' mm' : '(no scale)';
+      sax.textContent = (i === 0 ? 'Bass' : 'Treble') + ' axis: ' + mm;
+    } else {
+      dax.className = 'dot'; dax.style.background = i === 1 ? 'var(--cyn)' : '';
+      sax.textContent = (i === 0 ? 'Bass' : 'Treble') + ' axis: not set';
+    }
+    const n = c.rings.length, r = Math.max(0, n - 1);
+    dri.className = r > 0 ? 'dot ok' : 'dot';
+    dri.style.background = i === 1 && r > 0 ? 'var(--cyn)' : (i === 1 ? 'var(--cyn)' : '');
+    sri.textContent = (i === 0 ? 'Bass' : 'Treble') + ' rings: ' + r + '  (' + n + ' pts)';
+  }
+
+  if (S.frontType === 'two') {
+    pieceStat(0, 'd-ax0', 's-ax0', 'd-ri0', 's-ri0');
+    pieceStat(1, 'd-ax1', 's-ax1', 'd-ri1', 's-ri1');
+  } else {
+    const c = p(0);
+    const dax = document.getElementById('d-ax'), sax = document.getElementById('s-ax');
+    const dri = document.getElementById('d-ri'), sri = document.getElementById('s-ri');
+    if (c.axisA && c.axisB) {
+      dax.className = 'dot ok';
+      const mm = S.scale ? (axisLenPx(c)/S.scale).toFixed(1) + ' mm' : '(no scale)';
+      sax.textContent = 'Axis: ' + mm;
+    } else { dax.className = 'dot'; sax.textContent = 'Axis: not set'; }
+    const n = c.rings.length, r = Math.max(0, n - 1);
+    dri.className = r > 0 ? 'dot ok' : 'dot';
+    sri.textContent = 'Rings: ' + r + '  (' + n + ' pts)';
+  }
+}
+
+// ============================================================
+// Actions
+// ============================================================
+function undoLast() {
+  const c = cp();
+  if (S.tool === 'axis' && c.axisA && !c.axisB) { c.axisA = null; render(); setHint(HINTS['axis']); return; }
+  if (c.rings.length === 0) return;
+  c.rings.pop(); refreshMeasurements(); render();
+}
+function clearRings() {
+  if (cp().rings.length === 0) return;
+  const label = S.frontType === 'two' ? (S.ap === 0 ? 'Bass' : 'Treble') + ' ring' : 'ring';
+  if (!confirm('Clear all ' + label + ' measurements?')) return;
+  cp().rings = []; refreshMeasurements(); render();
+}
+// Delete one specific ring (by piece + index into that piece's rings array).
+function deleteRing(hit) {
+  const c = p(hit.pi);
+  if (hit.ri < 0 || hit.ri >= c.rings.length) return;
+  c.rings.splice(hit.ri, 1);
+  S.dragRing = null;
+  refreshMeasurements(); render();
+}
+
+// ============================================================
+// Rendering
+// ============================================================
+function render() {
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!S.img) return;
+  ctx.save(); ctx.translate(S.panX, S.panY); ctx.scale(S.zoom, S.zoom);
+  ctx.drawImage(S.img, 0, 0);
+  drawCal();
+  // Draw inactive piece first (dimmer), then active on top
+  const other = 1 - S.ap;
+  if (S.frontType === 'two') drawPiece(other, false);
+  drawPiece(S.ap, true);
+  drawCursor();
+  ctx.restore();
+}
+
+function drawCal() {
+  const pts = S.calPts, lw = 1.5 / S.zoom;
+  if (S.calTemp && S.mouse) {
+    line(S.calTemp, S.mouse, '#fbbf24', lw, [5/S.zoom, 4/S.zoom]);
+    dot(S.calTemp.x, S.calTemp.y, '#fbbf24', 5);
+  }
+  if (pts.length === 2) {
+    line(pts[0], pts[1], '#fbbf24', lw);
+    endTick(pts[0], pts[1], '#fbbf24', lw); endTick(pts[1], pts[0], '#fbbf24', lw);
+    dot(pts[0].x, pts[0].y, '#fbbf24', 4); dot(pts[1].x, pts[1].y, '#fbbf24', 4);
+  }
+}
+
+function drawPiece(i, active) {
+  const c    = p(i);
+  const col  = PCOL[i];
+  const alpha = active ? 1.0 : 0.35;
+  ctx.globalAlpha = alpha;
+  drawAxisFor(c, col, active);
+  drawRingsFor(c, col, i === S.ap && active);
+  ctx.globalAlpha = 1.0;
+}
+
+function drawAxisFor(c, col, active) {
+  const A = c.axisA;
+  if (!A) return;
+  const B = c.axisB || (active ? c.axisTmp : null) || (active && S.tool === 'axis' ? S.mouse : null);
+  dot(A.x, A.y, col, 5);
+  if (!B) return;
+  const lw = (active ? 1.5 : 1) / S.zoom;
+  const dash = c.axisB ? [] : [6/S.zoom, 4/S.zoom];
+  const dx = B.x-A.x, dy = B.y-A.y, len = Math.hypot(dx,dy) || 1;
+  const ex = dx/len * 20/S.zoom, ey = dy/len * 20/S.zoom;
+  line({x: A.x-ex, y: A.y-ey}, {x: B.x+ex, y: B.y+ey}, col, lw, dash);
+  if (c.axisB) {
+    arrow(A.x, A.y, B.x, B.y, col); dot(B.x, B.y, col, 5);
+    if (active) {
+      // Label which end is ring 1 vs the last ring, so measurement direction is unambiguous.
+      const nx = -dy/len, ny = dx/len, off = 15/S.zoom;
+      ctx.save();
+      ctx.font = (11/S.zoom) + 'px system-ui';
+      ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('ring 1', A.x - ex + nx*off, A.y - ey + ny*off);
+      ctx.fillText('last ring', B.x + ex + nx*off, B.y + ey + ny*off);
+      ctx.restore();
+    }
+  }
+}
+
+function drawRingsFor(c, col, isActive) {
+  if (!c.axisA || !c.axisB) return;
+  const dx = c.axisB.x - c.axisA.x, dy = c.axisB.y - c.axisA.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy/len, ny = dx/len;
+  const tl  = 28 / S.zoom;   // placed tick half-length (screen ~28 px)
+  // Phantom spans the whole canvas so it stays visible across f-holes, edges, etc.
+  const ptl = Math.max(cv.width, cv.height) / S.zoom;
+  const sorted = sortedRings(c);
+
+  // Pre-compute which ring index (in c.rings) is "hot" (dragged or hovered)
+  let hotRi = -1;
+  if (S.dragRing && S.dragRing.pi === S.pieces.indexOf(c)) {
+    hotRi = S.dragRing.ri;
+  } else if (!S.dragRing && S.tool === 'rings' && S.mouse) {
+    const h = findNearRing(S.mouse);
+    if (h && S.pieces[h.pi] === c) hotRi = h.ri;
+  }
+
+  sorted.forEach((pt, i) => {
+    const pp    = axisPt(pt.t, c);
+    const isHot = c.rings.indexOf(pt) === hotRi;
+    ctx.strokeStyle = isHot ? '#ffffff' : col;
+    ctx.lineWidth = (isHot ? 2 : 1.5) / S.zoom; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(pp.x - nx*tl, pp.y - ny*tl); ctx.lineTo(pp.x + nx*tl, pp.y + ny*tl); ctx.stroke();
+    dot(pt.x, pt.y, isHot ? '#ffffff' : col.replace(')', ',0.45)').replace('rgb', 'rgba'), isHot ? 5 : 3);
+    ctx.strokeStyle = col.replace(')', ',0.18)').replace('rgb', 'rgba');
+    ctx.lineWidth = 0.7/S.zoom; ctx.setLineDash([3/S.zoom, 3/S.zoom]);
+    ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pp.x, pp.y); ctx.stroke();
+    ctx.setLineDash([]);
+    const fs = Math.max(7, 10/S.zoom);
+    ctx.font = `${fs}px system-ui`; ctx.fillStyle = col;
+    ctx.fillText(i + 1, pp.x + nx*(tl+3/S.zoom), pp.y + ny*(tl+3/S.zoom));
+  });
+
+  // Phantom guide line — full canvas height, white, solid
+  // Stays visible even when the ring is hidden behind an f-hole or edge feature
+  if (isActive && S.tool === 'rings' && S.mouse && !S.dragRing) {
+    const t  = axisT(S.mouse.x, S.mouse.y, c);
+    const pp = axisPt(t, c);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2/S.zoom;
+    ctx.setLineDash([6/S.zoom, 5/S.zoom]);
+    ctx.beginPath(); ctx.moveTo(pp.x - nx*ptl, pp.y - ny*ptl); ctx.lineTo(pp.x + nx*ptl, pp.y + ny*ptl); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawCursor() {
+  if (!S.mouse || S.tool === 'pan') return;
+  const p = S.mouse, s = 7/S.zoom;
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 0.7/S.zoom; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(p.x-s, p.y); ctx.lineTo(p.x+s, p.y); ctx.moveTo(p.x, p.y-s); ctx.lineTo(p.x, p.y+s); ctx.stroke();
+}
+
+// Drawing helpers
+function line(a, b, col, lw, dash) {
+  ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.setLineDash(dash || []);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  ctx.setLineDash([]);
+}
+function dot(x, y, col, r) {
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r/S.zoom, 0, Math.PI*2); ctx.fill();
+}
+function endTick(a, b, col, lw) {
+  const dx = b.x-a.x, dy = b.y-a.y, l = Math.hypot(dx,dy)||1;
+  const nx = -dy/l, ny = dx/l, tk = 7/S.zoom;
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.moveTo(a.x+nx*tk, a.y+ny*tk); ctx.lineTo(a.x-nx*tk, a.y-ny*tk); ctx.stroke();
+}
+function arrow(x1,y1,x2,y2,col) {
+  const dx=x2-x1, dy=y2-y1, l=Math.hypot(dx,dy)||1;
+  const ux=dx/l, uy=dy/l, sz=9/S.zoom;
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - sz*ux + sz*.4*(-uy), y2 - sz*uy + sz*.4*ux);
+  ctx.lineTo(x2 - sz*ux - sz*.4*(-uy), y2 - sz*uy - sz*.4*ux);
+  ctx.closePath(); ctx.fill();
+}
+
+// ============================================================
+// Calibration modal
+// ============================================================
+let calCB = null;
+function openCalModal() {
+  document.getElementById('cal-inp').value = '';
+  document.getElementById('cal-bg').classList.add('show');
+  setTimeout(() => document.getElementById('cal-inp').focus(), 60);
+}
+function calOK() {
+  const d = parseFloat(document.getElementById('cal-inp').value);
+  document.getElementById('cal-bg').classList.remove('show');
+  if (isNaN(d) || d <= 0) { alert('Invalid distance.'); return; }
+  const dx = S.calPts[1].x - S.calPts[0].x, dy = S.calPts[1].y - S.calPts[0].y;
+  S.scale = Math.hypot(dx, dy) / d;
+  refreshStatus(); render();
+  setHint('Scale set: ' + S.scale.toFixed(2) + ' px/mm');
+}
+function calCancel() {
+  document.getElementById('cal-bg').classList.remove('show');
+  S.calPts = []; render();
+}
+document.getElementById('cal-inp').addEventListener('keydown', e => {
+  if (e.key === 'Enter')  calOK();
+  if (e.key === 'Escape') calCancel();
+});
+
+// ============================================================
+// Export helpers
+// ============================================================
+function getDir() {
+  return S.frontType === 'two'
+    ? document.getElementById('dir-' + S.ap).value
+    : document.getElementById('one-dir').value;
+}
+
+function buildExportPairs(pieceIdx) {
+  const c = p(pieceIdx !== undefined ? pieceIdx : S.ap);
+  const widths = getRingWidths(c);
+  if (widths.length === 0) return null;
+  const sid = (document.getElementById('sid').value.trim() || 'SERIES01').substring(0, 8);
+  const dir = pieceIdx !== undefined
+    ? document.getElementById('dir-' + pieceIdx).value
+    : getDir();
+  // Assign ring numbers only — no year
+  const pairs = widths.map((w, i) => ({ ring: i + 1, mm: w }));
+  return { sid, pairs, dir };
+}
+
+function buildTucsonString(pIdx) {
+  const d = buildExportPairs(pIdx);
+  if (!d) { alert('No measurements for this piece.'); return null; }
+  const { sid, pairs, dir } = d;
+  // Use arbitrary start year 1 — gogo uses parse_as_floating_series (no year needed)
+  const startY = 1;
+  // Don't reverse here - server handles reversal based on direction settings
+  const ordered = pairs;
+  const byYear  = {};
+  ordered.forEach((p, i) => { byYear[startY + i] = Math.round((p.mm || 0) * 100) || 1; });
+  const endY = startY + ordered.length - 1;
+  const lines = [
+    `; Series: ${sid}`,
+    `; Created: ${new Date().toISOString().slice(0, 10)} by Pennyscope`,
+    '',
+  ];
+  let y = Math.floor(startY / 10) * 10;
+  while (y <= endY) {
+    const vals = [];
+    for (let j = 0; j < 10; j++) {
+      const yr = y + j;
+      if (yr < startY) { vals.push('     0'); continue; }
+      if (yr > endY)   break;
+      vals.push(String(byYear[yr] ?? 999).padStart(6));
+    }
+    if (y + 10 > endY) vals.push('  9990');
+    lines.push(sid.padEnd(8) + String(y).padStart(5) + vals.join(''));
+    y += 10;
+  }
+  return lines.join('\n') + '\n';
+}
+
+function dl(text, name, mime) {
+  const b = new Blob([text], { type: mime });
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a');
+  a.href = u; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
+}
+
+function exportCSV() {
+  const c = cp(), widths = getRingWidths(c);
+  if (!widths.length) { alert('No measurements.'); return; }
+  const dir = getDir(), ordered = dir === 'D-L' ? [...widths].reverse() : widths;
+  const sid = document.getElementById('sid').value || 'SERIES01';
+  let csv = 'Ring,Width\n';
+  ordered.forEach((w, i) => { csv += `${i+1},${w.toFixed(4)}\n`; });
+  dl(csv, sid + '.csv', 'text/csv');
+}
+
+function exportTucson() {
+  const s = buildTucsonString(); if (!s) return;
+  const sid = document.getElementById('sid').value || 'SERIES01';
+  dl(s, sid + '.rwl', 'text/plain');
+}
+
+function exportFH() {
+  const d = buildExportPairs(); if (!d) { alert('No measurements.'); return; }
+  const { sid, pairs, dir } = d;
+  const ordered = dir === 'D-L' ? [...pairs].reverse() : pairs;
+  const vals  = ordered.map(p => Math.round((p.mm || 0) * 100) || 1);
+  const lines = ['HEADER:', `KeyCode     ${sid}`, `DateBegin   1`, `DateEnd     ${ordered.length}`,
+    `Length      ${ordered.length}`, `Unit        1/100 mm`, `Parameter   Ring Width`,
+    `Species     Picea abies`, `Comment     Measured with Pennyscope`, 'DATA:Ring widths'];
+  for (let i = 0; i < vals.length; i += 10) lines.push(vals.slice(i, i+10).join(' '));
+  lines.push('END:');
+  dl(lines.join('\n') + '\n', sid + '.fh', 'text/plain');
+}
+
+// ============================================================
+// Save / Load
+// ============================================================
+function saveProject() {
+  const imgPath = document.getElementById('img-path').value || S.imagePath;
+  const proj = {
+    version: 3,
+    seriesId:  document.getElementById('sid').value,
+    frontType: S.frontType,
+    oneDir:    document.getElementById('one-dir').value,
+    dir0:      document.getElementById('dir-0').value,
+    dir1:      document.getElementById('dir-1').value,
+    scale:     S.scale, calPts: S.calPts,
+    pieces:    S.pieces,
+    meta: {
+      instrument: document.getElementById('meta-instrument').value,
+      attributedOrigin: document.getElementById('meta-attrib').value,  // expert opinion, kept distinct from any dendro result
+      notes: document.getElementById('meta-notes').value,
+    },
+  };
+  if (imgPath) proj.imagePath = imgPath;
+  dl(JSON.stringify(proj, null, 2), (proj.seriesId || 'project') + '.dendro.json', 'application/json');
+}
+
+function loadProject(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      const q = JSON.parse(ev.target.result);
+      document.getElementById('sid').value      = q.seriesId  || '';
+      document.getElementById('one-dir').value  = q.oneDir    || 'L-D';
+      document.getElementById('dir-0').value    = q.dir0      || 'L-D';
+      document.getElementById('dir-1').value    = q.dir1      || 'L-D';
+      document.getElementById('front-type').value = q.frontType || 'two';
+      document.getElementById('img-path').value = q.imagePath || '';
+      const meta = q.meta || {};
+      document.getElementById('meta-instrument').value = meta.instrument || '';
+      document.getElementById('meta-attrib').value     = meta.attributedOrigin || '';
+      document.getElementById('meta-notes').value      = meta.notes || '';
+      S.scale    = q.scale    || null;
+      S.calPts   = q.calPts   || [];
+      S.pieces   = q.pieces   || [{ axisA:null, axisB:null, axisTmp:null, rings:[] }, { axisA:null, axisB:null, axisTmp:null, rings:[] }];
+      setFrontType(q.frontType || 'two');
+      refreshMeasurements(); render();
+      if (q.imagePath) {
+        S.imagePath = q.imagePath;
+        const img = new Image();
+        img.onload = () => {
+          S.img = img; S.imgW = img.naturalWidth; S.imgH = img.naturalHeight;
+          cacheImagePixels();
+          document.getElementById('drop-msg').style.display = 'none';
+          fitWindow(); refreshStatus();
+          setHint(`Project loaded with image: ${q.imagePath}`);
+        };
+        img.onerror = () => {
+          setHint(`Project loaded — image not found: ${q.imagePath}`);
+        };
+        img.src = SERVER + '/api/image/' + encodeURIComponent(q.imagePath);
+      } else {
+        setHint('Project loaded');
+      }
+    } catch(err) { alert('Could not load: ' + err.message); }
+  };
+  r.readAsText(f); e.target.value = '';
+}
+
+// ============================================================
+// Keyboard shortcuts
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'p') setTool('pan');
+  if (k === 'c') setTool('calibrate');
+  if (k === 'a') setTool('axis');
+  if (k === 'r') setTool('rings');
+  if (k === 'f') fitWindow();
+  if (k === '+' || k === '=') adjustZoom(1.2);
+  if (k === '-') adjustZoom(1/1.2);
+  if (S.frontType === 'two' && k === 'b') setActivePiece(0);
+  if (S.frontType === 'two' && k === 't') setActivePiece(1);
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undoLast(); }
+  // Delete / Backspace removes the ring currently under the cursor.
+  if ((k === 'delete' || k === 'backspace') && S.tool === 'rings' && S.mouse) {
+    const h = findNearRing(S.mouse);
+    if (h) { e.preventDefault(); deleteRing(h); }
+  }
+});
+
+// ============================================================
+// Server / gogo integration
+// ============================================================
+const SERVER = 'http://localhost:5174';
+let srvOk = false;
+
+async function runSetupDownload() {
+  const btn = document.getElementById('btn-dl');
+  const status = document.getElementById('dl-status');
+  btn.disabled = true;
+  btn.classList.add('busy');
+  status.textContent = '⏳ Downloading and indexing files...';
+
+  try {
+    const resp = await fetch(SERVER + '/api/setup/download', { method: 'POST' });
+    const data = await resp.json();
+    if (data.success) {
+      status.textContent = '✓ Cache download complete!';
+      document.getElementById('step2').style.opacity = '1';
+      document.getElementById('step2').style.pointerEvents = 'auto';
+    } else {
+      status.textContent = '✗ Error: ' + data.error;
+    }
+  } catch(e) {
+    status.textContent = '✗ Request failed: ' + e.message;
+  } finally {
+    btn.classList.remove('busy');
+    btn.disabled = false;
+  }
+}
+
+async function runSetupViolin() {
+  const btn = document.getElementById('btn-vln');
+  const status = document.getElementById('vln-status');
+  btn.disabled = true;
+  btn.classList.add('busy');
+  status.textContent = '⏳ Fetching tonewood forest references...';
+
+  try {
+    const resp = await fetch(SERVER + '/api/setup/violin', { method: 'POST' });
+    const data = await resp.json();
+    if (data.success) {
+      status.textContent = '✓ Setup complete! Reload to run analysis.';
+      setTimeout(() => {
+        checkServer();
+      }, 1500);
+    } else {
+      status.textContent = '✗ Error: ' + data.error;
+    }
+  } catch(e) {
+    status.textContent = '✗ Request failed: ' + e.message;
+  } finally {
+    btn.classList.remove('busy');
+    btn.disabled = false;
+  }
+}
+
+function checkServer() {
+  fetch(SERVER + '/api/status', { signal: AbortSignal.timeout(1500) })
+    .then(r => r.json())
+    .then(d => {
+      srvOk = d.ok;
+      document.getElementById('d-srv').className = 'dot ok';
+      document.getElementById('t-srv').textContent =
+        (d.app || 'Date-X') + ' v' + (d.version || '?') + ' — ready';
+      return fetch(SERVER + '/api/masters').then(r => r.json());
+    })
+    .then(m => {
+      if (!m.setup_complete) {
+        document.getElementById('setup-panel').style.display = '';
+        document.getElementById('btn-run').disabled = true;
+        document.getElementById('btn-xm').disabled  = true;
+        return;
+      }
+      document.getElementById('setup-panel').style.display = 'none';
+      document.getElementById('btn-run').disabled = false;
+      document.getElementById('btn-xm').disabled  = false;
+      const sel = document.getElementById('ana-mode');
+      const violinLabel = m.violin_label || 'Tonewood forest references';
+      sel.options[0].textContent = m.violin_ready
+        ? `${violinLabel} (${m.violin_count} sites)`
+        : `${violinLabel} (not fetched yet)`;
+      if (m.violin_blurb) sel.options[0].title = m.violin_blurb;
+      // Drop any option the engine no longer accepts, so the dropdown cannot offer a
+      // category that will be rejected server-side. 'custom' is handled here, not by
+      // the engine's category list, so it is always kept.
+      if (Array.isArray(m.categories)) {
+        [...sel.options].forEach(o => {
+          if (o.value !== 'custom' && !m.categories.includes(o.value)) o.remove();
+        });
+      }
+      // Adopt the engine's defaults so this UI starts where the CLI and desktop app do.
+      if (m.defaults) {
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+        set('ana-ovlp', m.defaults.min_overlap);
+        set('ana-mey',  m.defaults.min_end_year);
+        set('ana-topn', m.defaults.top_n);
+      }
+    })
+    .catch(() => {
+      srvOk = false;
+      document.getElementById('d-srv').className = 'dot';
+      document.getElementById('t-srv').textContent = 'Server offline — run: python finotserv.py';
+      document.getElementById('btn-run').disabled = true;
+      document.getElementById('btn-xm').disabled  = true;
+    });
+}
+
+function pieceRWL(i) { return buildTucsonString(i); }
+
+async function runAnalysis() {
+  if (S.frontType === 'two') {
+    runCrossmatch();
+    return;
+  }
+
+  const c = cp();
+  if (c.rings.length < 2) { alert('Mark at least 2 ring boundaries first.'); return; }
+  if (!customReferenceReady()) return;
+  const rwl = buildTucsonString(S.ap);
+  if (!rwl) return;
+
+  const btn = document.getElementById('btn-run');
+  btn.textContent = '⏳ Running…'; btn.classList.add('busy'); btn.disabled = true;
+
+  try {
+    const dir = getDir();
+    const resp = await fetch(SERVER + '/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rwl,
+        mode:        document.getElementById('ana-mode').value,
+        reverse:     dir === 'D-L',
+        ...analysisParams(),
+      }),
+    });
+    showResults(await resp.json(), false);
+  } catch(e) { alert('Request failed: ' + e.message + '\n\nIs server.py running?'); }
+  finally { btn.textContent = '▶ Run Dating Analysis'; btn.classList.remove('busy'); btn.disabled = false; }
+}
+
+// Every analysis parameter the engine accepts, gathered in one place so the analyze and
+// cross-match calls cannot drift apart. Pennyscope previously sent only mode and overlap,
+// which left stiffness, reference cut-off and top-N pinned at server defaults and made a
+// Pennyscope run non-reproducible from the desktop app.
+// A reference file the user picked themselves. Only its contents travel to the server —
+// the browser cannot hand over a real path, and the server deliberately refuses to accept
+// one, since it listens on every interface.
+let customReference = { name: '', content: '' };
+
+function onModeChange() {
+  const isCustom = document.getElementById('ana-mode').value === 'custom';
+  document.getElementById('ana-custom-row').style.display  = isCustom ? '' : 'none';
+  document.getElementById('ana-custom-name').style.display = isCustom ? '' : 'none';
+}
+
+function onCustomFile() {
+  const f = document.getElementById('ana-custom-file').files[0];
+  const label = document.getElementById('ana-custom-label');
+  if (!f) { customReference = { name: '', content: '' }; label.textContent = 'no file chosen'; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    customReference = { name: f.name, content: String(reader.result || '') };
+    const kb = (customReference.content.length / 1024).toFixed(1);
+    label.textContent = `${f.name} (${kb} KB)`;
+  };
+  reader.onerror = () => { alert('Could not read ' + f.name); };
+  reader.readAsText(f);
+}
+
+function analysisParams() {
+  const [dmode, dwave] = (document.getElementById('ana-detrend').value || 'fixed:32').split(':');
+  const params = {
+    min_overlap:        parseInt(document.getElementById('ana-ovlp').value)  || 60,
+    min_end_year:       parseInt(document.getElementById('ana-mey').value)   || 1500,
+    top_n:              parseInt(document.getElementById('ana-topn').value)  || 10,
+    detrend_mode:       dmode,
+    detrend_wavelength: parseInt(dwave) || 32,
+    spline:             dmode === 'percent' ? (parseInt(dwave) || 67) : 67,
+    // The engine needs the series ID to hold this series out of a reference that
+    // contains it; the sample itself travels as a temp file with no usable name.
+    series_id:          document.getElementById('sid').value || '',
+    // Which index the t-value is computed on. 'spline' is the default and the setting
+    // the documented thresholds were set for; the selector is optional, so a build of
+    // this page without it keeps the engine default.
+    index:              (document.getElementById('ana-index') || {}).value || 'all',
+  };
+  if (document.getElementById('ana-mode').value === 'custom') {
+    params.reference_name    = customReference.name;
+    params.reference_content = customReference.content;
+  }
+  return params;
+}
+
+// True when the run can proceed; warns instead of sending an empty custom reference.
+function customReferenceReady() {
+  if (document.getElementById('ana-mode').value !== 'custom') return true;
+  if (!customReference.content.trim()) {
+    alert('Choose a reference file first (a master .csv or a .rwl chronology).');
+    return false;
+  }
+  return true;
+}
+
+async function runCrossmatch() {
+  const [b, t] = [p(0), p(1)];
+  if (b.rings.length < 2) { alert('Mark Bass rings first.'); return; }
+  if (t.rings.length < 2) { alert('Mark Treble rings first.'); return; }
+  if (!customReferenceReady()) return;
+
+  const bassRwl   = buildTucsonString(0);
+  const trebleRwl = buildTucsonString(1);
+  if (!bassRwl || !trebleRwl) return;
+
+  const btn = document.getElementById('btn-xm');
+  btn.textContent = '⏳ Cross-matching…'; btn.classList.add('busy'); btn.disabled = true;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000); // 2min timeout
+
+    const resp = await fetch(SERVER + '/api/crossmatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        bass_rwl:    bassRwl,
+        treble_rwl:  trebleRwl,
+        reverse_bass:   document.getElementById('dir-0').value !== 'L-D',
+        reverse_treble: document.getElementById('dir-1').value !== 'L-D',
+        mode:        document.getElementById('ana-mode').value,
+        ...analysisParams(),
+      }),
+    });
+    clearTimeout(timeout);
+    showResults(await resp.json(), true);
+  } catch(e) { alert('Request failed: ' + e.message); }
+  finally { btn.textContent = '⚡ Cross-match pieces'; btn.classList.remove('busy'); btn.disabled = false; }
+}
+
+function showResults(r, isCrossmatch) {
+  if (!r.ok) {
+    // Show error in modal instead of alert
+    const ib = document.getElementById('int-bar');
+    ib.style.display = 'none';
+    document.getElementById('res-stats').style.display  = 'none';
+    document.getElementById('res-plot').style.display   = 'none';
+    document.getElementById('res-top').style.display    = 'none';
+    document.getElementById('res-title').textContent    = '❌ Analysis failed';
+
+    let errorMsg = (r.error || 'Unknown error') + '\n';
+    if (r.log) errorMsg += '\n--- Log ---\n' + r.log;
+    document.getElementById('log-pre').textContent = errorMsg;
+
+    // For crossmatch: show internal stats even on failure
+    if (isCrossmatch && r.internal_t !== undefined) {
+      ib.style.display = '';
+      const intText = `Internal Match Results:
+T-value: ${r.internal_t?.toFixed(2) ?? '—'}
+GLK%: ${r.internal_glk?.toFixed(1) ?? '—'}
+Status: ✗ Pieces do not match (same tree unlikely)`;
+      document.getElementById('int-text').textContent = intText;
+      document.getElementById('res-title').textContent    = '✗ Cross-match failed';
+    }
+
+    document.getElementById('res-bg').classList.add('show');
+    return;
+  }
+
+  const sid = document.getElementById('sid').value || 'Sample';
+  document.getElementById('res-title').textContent =
+    `${sid}  →  end year ${r.best_year}  (${r.source_file || ''})`;
+
+  // Internal match bar (crossmatch only)
+  const ib = document.getElementById('int-bar');
+  if (isCrossmatch && r.internal_t !== undefined) {
+    ib.style.display = '';
+    // Roughly 70% of two-piece tops are book-matched from one wedge and 30% come from
+    // separate logs. Both are normal, so the verdict is reported rather than treated as
+    // a pass/fail, and each half is dated on its own either way.
+    const verdicts = {
+      same_wedge:     '✓ One wedge — both halves are the same tree (averaged for dating)',
+      different_logs: '✗ Different logs — halves are separate trees (each dated alone)',
+      inconclusive:   '~ Inconclusive — not enough agreement to treat as one tree (each dated alone)',
+    };
+    const status = verdicts[r.plate_verdict] || (r.pieces_match ? '✓ Pieces match' : '✗ Weak internal match');
+    const half = (label, h) => h
+      ? `\n${label}: end ${h.best_year}, t=${h.t_value.toFixed(2)}, Glk=${h.glk.toFixed(1)}%, overlap=${h.overlap_n}`
+      : `\n${label}: no result`;
+    let intText = `Internal Cross-Match:
+T-value: ${r.internal_t.toFixed(2)}
+GLK%: ${r.internal_glk.toFixed(1)}
+Status: ${status}`;
+    if (r.plate_note) intText += `\n${r.plate_note}`;
+    intText += half('Bass alone', r.bass_result) + half('Treble alone', r.treble_result);
+    if (r.bass_result && r.treble_result) {
+      intText += r.bass_result.best_year === r.treble_result.best_year
+        ? '\nThe two halves agree on the end year.'
+        : `\nThe two halves DISAGREE by ${Math.abs(r.bass_result.best_year - r.treble_result.best_year)} years.`;
+    }
+    document.getElementById('int-text').textContent = intText;
+  } else { ib.style.display = 'none'; }
+
+  document.getElementById('res-stats').style.display = '';
+  document.getElementById('r-year').textContent = r.best_year;
+  document.getElementById('r-tval').textContent = r.t_value.toFixed(2);
+  document.getElementById('r-glk').textContent  = r.glk.toFixed(1);
+  document.getElementById('r-ovlp').textContent = r.overlap_n;
+  document.getElementById('r-corr').textContent = r.correlation.toFixed(3);
+
+  document.getElementById('r-r2').textContent = (r.r2 ?? 0).toFixed(2);
+
+  // Criteria met, not a quality adjective; the reading is attributed in r-class below.
+  const el = document.getElementById('r-str');
+  el.textContent = r.criteria_met || '—'; el.className = 'rstrength sn';
+  document.getElementById('r-index').textContent = r.index_comparison_text || (r.index_note || '');
+  document.getElementById('r-class').textContent = r.classification_text || '';
+
+  const img = document.getElementById('res-plot');
+  if (r.plot_png) { img.src = 'data:image/png;base64,' + r.plot_png; img.style.display = 'block'; }
+  else            { img.style.display = 'none'; }
+
+  const topDiv = document.getElementById('res-top'), topBody = document.getElementById('top-body');
+  if (r.top_matches?.length) {
+    topDiv.style.display = '';
+    topBody.innerHTML = r.top_matches.map((m, i) =>
+      `<tr><td>${i+1}</td><td>${m.end_year}</td><td>${m.t_value.toFixed(2)}</td><td>${m.glk.toFixed(1)}</td><td>${m.source_file}</td></tr>`
+    ).join('');
+  } else { topDiv.style.display = 'none'; }
+
+  document.getElementById('log-pre').textContent = r.log || '';
+  document.getElementById('res-bg').classList.add('show');
+}
+
+function closeResults() { document.getElementById('res-bg').classList.remove('show'); }
+
+// No colour scale by "quality": the badge states which criteria were met, nothing more.
+
+checkServer();
+setInterval(checkServer, 8000);
+
+// ============================================================
+// Collapsible sidebar panels
+// ============================================================
+// Fold state is remembered per panel, so a panel you closed stays closed next time
+// instead of having to be closed on every visit.
+const PANEL_STATE_KEY = 'pennyscope.collapsedPanels';
+
+function collapsedPanels() {
+  try { return JSON.parse(localStorage.getItem(PANEL_STATE_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function togglePanel(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const collapsed = el.classList.toggle('collapsed');
+  const state = collapsedPanels();
+  state[id] = collapsed;
+  try { localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+function restorePanels() {
+  const state = collapsedPanels();
+  document.querySelectorAll('.panel.collapsible').forEach(el => {
+    if (state[el.id]) el.classList.add('collapsed');
+  });
+}
+
+// Init
+setTool('pan');
+restorePanels();
+// Drive the panel visibility from S.frontType rather than from inline styles in the
+// markup, so the two cannot disagree and the default only has to be changed in one place.
+document.getElementById('front-type').value = S.frontType;
+setFrontType(S.frontType);
+setActivePiece(S.ap);
+refreshStatus();
+</script>
+</body>
+</html>
