@@ -4,8 +4,8 @@ import shutil
 
 # --- Configuration ---
 SOURCE_DIR = "full_rwl_cache"
-DEST_DIR = "violin_references"
-MASTER_FILENAME = "master_violin_chronology.csv"
+DEST_DIR = "tonewood_references"
+MASTER_FILENAME = "master_tonewood_forest_references.csv"
 
 # List of files from the Cybis wiki
 VIOLIN_FILES = [
